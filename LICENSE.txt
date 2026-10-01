@@ -1,0 +1,5 @@
+Copyright (c) 2026 Orbit Lab contributors. All rights reserved.
+
+No license is granted to copy, modify, redistribute, sublicense or sell the application source or original application assets without the copyright owner's permission.
+
+Third-party components retain their respective licenses. See docs/THIRD-PARTY-NOTICES.md and the notices included with the desktop runtime.
