@@ -196,6 +196,58 @@ try {
     assert.ok(Math.abs(chart.bars.find(bar => bar.kind === 'saved').days - 1033.1025187294167) < 1e-8);
     assert.equal(chart.series.find(series => series.kind === 'saved').marker.progress, .25);
   });
+  await check('native detail panel preserves the imported orbit and reports independently known component units while paused', async () => {
+    const before = await project(), initial = await state(), v0 = 29784.691834309108, AU = 149597870700;
+    const reference = {
+      'velocity.radialMps': .6 * v0, 'velocity.transverseMps': .8 * v0, 'velocity.speedMps': v0,
+      'velocity.flightPathAngleRad': Math.atan(3 / 4), 'phase.meanAnomalyRad': Math.PI / 2 - .6,
+      'phase.eccentricAnomalyRad': Math.PI / 2, 'phase.trueAnomalyRad': Math.atan2(.8, -.6),
+      'acceleration.magnitudeMps2': v0 * v0 / AU, 'energy.kineticJPerKg': v0 * v0 / 2,
+      'energy.potentialJPerKg': -v0 * v0, 'energy.totalJPerKg': -v0 * v0 / 2,
+      'momentum.specificM2PerS': .8 * AU * v0, 'phase.trueRateRadPerS': .8 * v0 / AU,
+    };
+    for (const [key, expected] of Object.entries(reference)) {
+      const actual = Number(await page.locator(`[data-detail-value="${key}"]`).getAttribute('data-raw'));
+      assert.ok(Math.abs(actual - expected) < 1e-11 * Math.abs(expected) + 1e-12, `${key}: ${actual} != ${expected}`);
+    }
+    assert.match(await page.locator('[data-detail-value="energy.totalJPerKg"]').textContent(), /^-.*MJ\/kg$/);
+    assert.match(await page.locator('[data-detail-value="momentum.specificM2PerS"]').textContent(), /km²\/s$/);
+    assert.match(await page.locator('[data-detail-value="acceleration.magnitudeMps2"]').textContent(), /mm\/s²$/);
+    assert.match(await page.locator('[data-detail-value="phase.trueRateRadPerS"]').textContent(), /°\/일$/);
+    await page.locator('#part-select').selectOption('orbiter');
+    assert.equal(await page.locator('#part-facts dd').count(), 6);
+    const totalEnergy = await page.locator('#part-facts > div').filter({ has: page.locator('dt', { hasText: '단위 질량당 총에너지' }) }).locator('dd').getAttribute('data-raw');
+    assert.ok(Math.abs(Number(totalEnergy) + v0 * v0 / 2e6) < 1e-9);
+    await page.locator('#part-select').selectOption(before.observation.view.selectedPart);
+    await delay(120); assert.deepEqual((await state()).snapshot, initial.snapshot); assert.equal((await state()).running, false);
+    sameProject(await project(), before);
+  });
+  await check('native inspection save uses the original camera and restores current layers without persisting temporary construction', async () => {
+    await page.locator('#part-select').selectOption('velocity-vector');
+    const before = await project(); await page.locator('#inspect-part').click();
+    assert.equal((await page.evaluate(() => window.orbitLab.getInspection())).kind, 'motion');
+    const scene = await page.evaluate(() => window.orbitLab.sceneDebug());
+    assert.deepEqual(scene.projectCamera, before.observation.camera); assert.notDeepEqual(scene.camera, before.observation.camera);
+    assert.equal(scene.constructions.accelerationIsDirectionOnly, true);
+    await page.locator('[data-view="geometry"]').check(); await page.locator('[data-view="orbit"]').uncheck();
+    const expected = await project(); assert.deepEqual(expected.experiment, before.experiment); assert.deepEqual(expected.comparison, before.comparison);
+    assert.deepEqual(expected.observation.camera, before.observation.camera);
+    const inspectionPath = path.join(evidence, '상세 관찰 원래 시점.orbit.json');
+    await saveDialog(inspectionPath); await freshToast(() => page.locator('#save-project').click(), '저장');
+    sameProject(JSON.parse(await fs.readFile(inspectionPath, 'utf8')), expected);
+    assert.equal((await page.evaluate(() => window.orbitLab.getInspection())).id, 'velocity-vector');
+    await openDialog(projectPath, true); await freshToast(() => page.locator('#open-project').click(), '취소');
+    assert.equal((await page.evaluate(() => window.orbitLab.getInspection())).id, 'velocity-vector'); sameProject(await project(), expected);
+    await page.screenshot({ path: path.join(evidence, 'native-inspection.png') });
+    await openDialog(inspectionPath); await freshToast(() => page.locator('#open-project').click(), '복원');
+    assert.equal(await page.evaluate(() => window.orbitLab.getInspection()), null); sameProject(await project(), expected);
+    const restored = await page.evaluate(() => window.orbitLab.sceneDebug());
+    assert.equal(restored.orbitVisible, false); assert.equal(restored.view.geometry, true);
+    assert.equal(restored.constructions, null); assert.deepEqual(restored.camera, expected.observation.camera);
+    // Keep the original desktop integration fixture for the remaining baseline flows.
+    await openDialog(projectPath); await freshToast(() => page.locator('#open-project').click(), '복원');
+    sameProject(await project(), saved);
+  });
   await check('native play/pause and explicit orbital progress retain the frozen comparison and observation camera', async () => {
     const before = await project();
     await menu('실험', '궤도 재생 / 일시정지');

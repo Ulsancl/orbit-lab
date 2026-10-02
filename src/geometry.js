@@ -21,6 +21,8 @@ export const GEOMETRY = Object.freeze({
   particleSymbolRadiusWorld: .018,
   orbitSamples: 512,
   sectorSamples: 1024,
+  accelerationDirectionLengthWorld: .16,
+  constructionSamples: 128,
 });
 const finite = value => typeof value === 'number' && Number.isFinite(value);
 const clean = value => Object.is(value, -0) ? 0 : value;
@@ -36,6 +38,36 @@ export function velocityVectorEnd(positionM, velocityMps) {
   assertPoint(velocityMps, 'velocityMps');
   const start = physicalToWorld(positionM), k = GEOMETRY.velocityWorldPerKmS / 1000;
   return [clean(start[0] + velocityMps.x * k), 0, clean(start[2] - velocityMps.y * k)];
+}
+
+// Read-only constructions in the same AU plane. Velocity components use the
+// existing fixed velocity scale; acceleration is explicitly a direction glyph.
+export function orbitVectorConstruction(snapshot) {
+  const { positionM: p, velocityMps: v, config } = snapshot ?? {};
+  assertPoint(p, 'positionM'); assertPoint(v, 'velocityMps');
+  const radius = snapshot.radiusM; if (!finite(radius) || !(radius > 0) || !config || !finite(config.semiMajorAxisM) || !finite(config.eccentricity) || !finite(snapshot.meanMotionRadPerS) || !finite(snapshot.eccentricAnomalyRad)) throw new RangeError('finite solved orbital dimensions required');
+  const er = { x: p.x / radius, y: p.y / radius }, et = { x: -er.y, y: er.x };
+  // Factored r-dot-v avoids cancellation in nearly circular orbits.
+  const radialMps = config.eccentricity === 0 || snapshot.meanAnomalyRad === 0 || snapshot.meanAnomalyRad === Math.PI ? 0 : snapshot.meanMotionRadPerS * config.semiMajorAxisM ** 2 * config.eccentricity * Math.sin(snapshot.eccentricAnomalyRad) / radius;
+  const transverseMps = v.x * et.x + v.y * et.y;
+  const radialVectorMps = { x: radialMps * er.x, y: radialMps * er.y }, transverseVectorMps = { x: transverseMps * et.x, y: transverseMps * et.y };
+  const origin = physicalToWorld(p), radialEnd = velocityVectorEnd(p, radialVectorMps), transverseEnd = velocityVectorEnd(p, transverseVectorMps), totalEnd = velocityVectorEnd(p, v);
+  const sumEnd = radialEnd.map((value, i) => clean(value + transverseEnd[i] - origin[i]));
+  const d = GEOMETRY.accelerationDirectionLengthWorld;
+  return { origin, radialMps: clean(radialMps), transverseMps: clean(transverseMps), radialVectorMps, transverseVectorMps, radialEnd, transverseEnd, totalEnd, sumEnd,
+    accelerationDirectionEnd: [clean(origin[0] - er.x * d), 0, clean(origin[2] + er.y * d)], accelerationIsDirectionOnly: true };
+}
+
+export function anomalyConstruction(snapshot) {
+  const { config, eccentricAnomalyRad: E, meanAnomalyRad: M, trueAnomalyRad: nu } = snapshot ?? {};
+  if (!config || ![E, M, nu, config.semiMajorAxisM, config.eccentricity].every(finite) || config.semiMajorAxisM <= 0 || config.eccentricity < 0 || config.eccentricity >= 1 || [E, M, nu].some(a => a < 0 || a >= 2 * Math.PI)) throw new TypeError('finite bound-orbit anomalies required');
+  const a = config.semiMajorAxisM / GEOMETRY.astronomicalUnitM, center = [-a * config.eccentricity, 0, 0], focus = [0, 0, 0], position = physicalToWorld(snapshot.positionM);
+  const at = angle => [clean(center[0] + a * Math.cos(angle)), 0, clean(-a * Math.sin(angle))];
+  const arc = (origin, radius, angle) => Array.from({ length: GEOMETRY.constructionSamples + 1 }, (_, i) => { const t = angle * i / GEOMETRY.constructionSamples; return [clean(origin[0] + radius * Math.cos(t)), 0, clean(origin[2] - radius * Math.sin(t))]; });
+  const auxiliaryCircle = arc(center, a, 2 * Math.PI); auxiliaryCircle[auxiliaryCircle.length - 1] = [...auxiliaryCircle[0]];
+  return { center, focus, position, auxiliaryRadiusWorld: a, auxiliaryCircle, eccentricPoint: at(E), meanTimePoint: at(M),
+    meanArc: arc(center, a * .36, M), eccentricArc: arc(center, a * .26, E), trueArc: arc(focus, a * .18, nu),
+    meanAnomalyRad: M, eccentricAnomalyRad: E, trueAnomalyRad: nu, meanPointIsTimeReference: true };
 }
 export function orbitLandmarks(snapshot) {
   const { config, semiMinorAxisM, periapsisM, apoapsisM } = snapshot ?? {};

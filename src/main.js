@@ -4,6 +4,9 @@ import { createProject, parseProject, serializeProject, normalizeView, DEFAULT_V
 import { COMPONENTS } from './geometry.js';
 import { OrbitScene } from './scene.js';
 import { OrbitChart } from './chart.js';
+import { orbitDetail } from './detail-model.js';
+import { OrbitDetailPanel } from './detail-panel.js';
+import './detail-panel.css';
 import { LESSONS, createGuide, lessonReady, confirmObservation, guideText } from './lessons.js';
 
 const $ = selector => document.querySelector(selector), $$ = selector => [...document.querySelectorAll(selector)];
@@ -18,6 +21,8 @@ let running = false, frameId = null, anchor = null, lastPaint = 0, lastSave = 0;
 let saveTimer, toastTimer, recoveredRaw = null, storageBlocked = false;
 let savedSnapshot = null, savedSnapshotInput = null;
 const chart = new OrbitChart($('#speed-chart'), $('#period-chart'));
+const inspectionParts = new Set(['velocity-vector','radius-line','orbiter','orbit-path','ellipse-center','second-focus','semimajor-axis']);
+const detailPanel = new OrbitDetailPanel($('#orbit-details'), $('#part-facts'), $('#part-detail-note'), { onInspect: beginInspection });
 
 function toast(message) {
   clearTimeout(toastTimer); const close = Object.assign(document.createElement('button'), { textContent: '닫기', type: 'button' });
@@ -30,7 +35,20 @@ function comparisonSnapshot() {
   if (savedSnapshotInput !== comparison) { savedSnapshotInput = comparison; savedSnapshot = comparison ? getSnapshot(comparison.experiment) : null; }
   return savedSnapshot;
 }
-function capture() { return createProject({ experiment, comparison, view, camera: scene?.getCameraState() ?? initialCamera, daysPerSecond }); }
+function capture() { return createProject({ experiment, comparison, view, camera: scene?.getProjectCameraState?.() ?? scene?.getCameraState() ?? initialCamera, daysPerSecond }); }
+function selectPart(id) {
+  if (busy) { syncControls(); return; }
+  if (!COMPONENTS.some(part => part.id === id)) throw new RangeError('Unknown orbit component');
+  view.selectedPart = id;
+  if (scene?.getInspection?.()) { if (inspectionParts.has(id)) scene.beginInspection(id); else scene.endInspection(); }
+  syncControls(); refresh(); scheduleSave();
+}
+function beginInspection(id = view.selectedPart) {
+  if (busy || !inspectionParts.has(id) || !scene?.beginInspection?.(id)) return false;
+  view.selectedPart = id; syncControls(); refresh(); $('#toast').hidden = true;
+  requestAnimationFrame(() => $('.observation').scrollIntoView({ block: 'start' })); scheduleSave(); return true;
+}
+function endInspection() { scene?.endInspection?.(); refresh(); scheduleSave(); }
 function saveLocal() {
   clearTimeout(saveTimer); if (storageBlocked || restoring) return;
   try { localStorage.setItem(STORAGE_KEY, serializeProject(capture())); text('#save-status', '이 기기에 자동 저장됨'); }
@@ -83,18 +101,18 @@ function changeConfig(patch) {
   if (busy) return;
   const config = normalizeConfig({ ...experiment.config, ...patch });
   if (Object.keys(config).every(key => config[key] === experiment.config[key])) { syncControls(); return; }
-  pause(); experiment.config = config; updateSnapshot(); syncControls(); refresh(); scheduleSave();
+  pause(); scene?.endInspection?.(); experiment.config = config; updateSnapshot(); syncControls(); refresh(); scheduleSave();
 }
 function remember() { syncTime(); previous = { project: capture(), guide: copy(guide) }; $('#undo-new').hidden = false; }
 function readProject(project, restoredGuide = null) {
   const saved = parseProject(serializeProject(project));
-  pause(); restoring = true;
+  pause(); scene?.endInspection?.(); restoring = true;
   try { ({ experiment, comparison } = saved); ({ view, camera: initialCamera, daysPerSecond } = saved.observation); guide = restoredGuide; chartDisplay = 'both'; updateSnapshot(); syncControls(); refresh(); if (initialCamera) scene?.setCameraState(initialCamera); else scene?.resetCamera(); }
   finally { restoring = false; }
   saveLocal();
 }
 function newExperiment() {
-  if (busy) return; pause(); remember(); experiment = createExperiment(DEFAULT_CONFIG); comparison = null; guide = null; daysPerSecond = 15;
+  if (busy) return; pause(); remember(); scene?.endInspection?.(); experiment = createExperiment(DEFAULT_CONFIG); comparison = null; guide = null; daysPerSecond = 15;
   view = normalizeView(DEFAULT_VIEW); chartDisplay = 'both'; updateSnapshot(); syncControls(); refresh(); scene?.resetCamera(); saveLocal(); toast('새 실험을 시작했습니다. 직전 실험은 되돌릴 수 있습니다.');
 }
 function setBusy(value) {
@@ -102,9 +120,18 @@ function setBusy(value) {
   busy = value; $('#save-project').disabled = value; $('#open-project').disabled = value;
   if (desktop?.setBusy) Promise.resolve(desktop.setBusy(value)).catch(() => {});
 }
+const conditionDisplays = new WeakMap();
 function syncControls() {
-  $('#a').value = experiment.config.semiMajorAxisM / AU; $('#a-number').value = Number((experiment.config.semiMajorAxisM / AU).toFixed(8));
-  $('#eccentricity').value = experiment.config.eccentricity; $('#eccentricity-number').value = experiment.config.eccentricity;
+  for (const [id, key, multiplier] of [['a', 'semiMajorAxisM', AU], ['eccentricity', 'eccentricity', 1]]) {
+    const value = String(experiment.config[key] / multiplier);
+    for (const selector of [`#${id}`, `#${id}-number`]) {
+      const input = $(selector); input.step = 'any'; input.value = value;
+      input.setAttribute('aria-valuetext', `${value}${multiplier === AU ? ' AU' : ''}`);
+      // Native range inputs may canonicalize their last decimal even with
+      // step=any. Remember that display without replacing the applied SI value.
+      conditionDisplays.set(input, { value: Number(input.value), applied: experiment.config[key] });
+    }
+  }
   $('#rate').value = daysPerSecond; $('#part-select').value = view.selectedPart;
   for (const input of $$('[data-view]')) input.checked = view[input.dataset.view];
   for (const button of $$('[data-lesson]')) button.setAttribute('aria-pressed', String(button.dataset.lesson === guide?.id));
@@ -130,13 +157,19 @@ function refresh(paint = true) {
   text('#apsis-reading', circle ? `원에서는 어느 곳이나 ${fmt(snapshot.radiusM / AU, 2)} AU로 같습니다.` : `가까운 곳 ${fmt(snapshot.periapsisM / AU, 2)} AU · 먼 곳 ${fmt(snapshot.apoapsisM / AU, 2)} AU`);
   $('#area-readout').hidden = !view.equalAreas; text('#area-duration', `각 ${fmt(snapshot.periodS / DAY / 12, 2)}일`); text('#area-value', `면적 A = B = ${fmt(snapshot.orbitAreaM2 / AU ** 2 / 12, 5)} AU²`);
   const part = COMPONENTS.find(item => item.id === view.selectedPart); text('#part-description', part?.description ?? '요소를 선택하세요.');
+  detailPanel.render(snapshot, view.selectedPart);
+  const inspection = scene?.getInspection?.();
+  $('#inspection-strip').hidden = !inspection; text('#inspection-note', inspection?.note ?? '');
+  $('#inspect-part').disabled = !inspectionParts.has(view.selectedPart) || !scene?.beginInspection;
+  $('#inspect-part').setAttribute('aria-pressed', String(Boolean(inspection)));
+  text('#inspect-part', inspection ? '상세 관찰 마치기' : '구성 자세히');
   $('#comparison-panel').hidden = !comparison;
   if (comparison) text('#comparison-summary', `현재 ${conditionName(experiment)} / 보관 ${conditionName(comparison.experiment)}`);
   for (const button of $$('[data-chart-mode]')) button.setAttribute('aria-pressed', String(button.dataset.chartMode === chartDisplay));
   drawChart(); renderGuide(); if (paint) scene?.update(snapshot, view, comparisonSnapshot());
 }
 function startLesson(id) {
-  if (busy || !Object.hasOwn(LESSONS, id)) return; pause(); remember();
+  if (busy || !Object.hasOwn(LESSONS, id)) return; pause(); remember(); scene?.endInspection?.();
   experiment = createExperiment(LESSONS[id].config); guide = createGuide(id); comparison = null; daysPerSecond = 15; chartDisplay = 'both'; view = normalizeView(DEFAULT_VIEW);
   updateSnapshot(); syncControls(); refresh(); scene?.resetCamera(); saveLocal(); $('#lesson-guide').scrollIntoView({ block: 'nearest' });
 }
@@ -161,14 +194,37 @@ function toggleFocus() { document.body.classList.toggle('focus-mode'); text('#fo
 function help() { pause(); $('#help-dialog').showModal(); }
 
 $('#part-select').replaceChildren(...COMPONENTS.map(part => Object.assign(document.createElement('option'), { value: part.id, textContent: part.label })));
-try { scene = new OrbitScene($('#scene'), { onSelect: id => { view.selectedPart = id; syncControls(); refresh(); scheduleSave(); }, onCameraChange: scheduleSave }); if (initialCamera) scene.setCameraState(initialCamera); }
+try { scene = new OrbitScene($('#scene'), { onSelect: selectPart, onCameraChange: scheduleSave }); if (initialCamera) scene.setCameraState(initialCamera); }
 catch (error) { $('#scene-error').hidden = false; text('#scene-error', `3D 화면을 시작하지 못했습니다. ${error.message}`); }
 syncControls(); refresh(); if (!initialCamera) scene?.resetCamera();
-$('#a').addEventListener('input', event => changeConfig({ semiMajorAxisM: Number(event.target.value) * AU }));
-$('#eccentricity').addEventListener('input', event => changeConfig({ eccentricity: Number(event.target.value) }));
-for (const [selector, key, multiplier] of [['#a-number', 'semiMajorAxisM', AU], ['#eccentricity-number', 'eccentricity', 1]]) {
-  const applyNumber = event => { const value = Number(event.target.value); if (event.target.value.trim() && Number.isFinite(value)) changeConfig({ [key]: value * multiplier }); else syncControls(); };
-  $(selector).addEventListener('change', applyNumber); $(selector).addEventListener('blur', applyNumber);
+for (const [id, key, multiplier] of [['a', 'semiMajorAxisM', AU], ['eccentricity', 'eccentricity', 1]]) {
+  const applyValue = event => {
+    const input = event.target, value = Number(input.value), displayed = conditionDisplays.get(input);
+    // An unchanged AU display must not round-trip the saved SI value, pause
+    // playback or end inspection. Division followed by multiplication can
+    // differ by an ULP even when the user has not edited the input.
+    if (busy || !input.value.trim() || !Number.isFinite(value) || value === experiment.config[key] / multiplier
+      || (displayed?.applied === experiment.config[key] && value === displayed.value)) { syncControls(); return; }
+    changeConfig({ [key]: value * multiplier });
+  };
+  for (const selector of [`#${id}`, `#${id}-number`]) {
+    const input = $(selector), range = input.type === 'range';
+    for (const event of range ? ['input'] : ['change', 'blur']) input.addEventListener(event, applyValue);
+    input.addEventListener('keydown', event => {
+      if (event.altKey || event.ctrlKey || event.metaKey) return;
+      const directions = range ? { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1, PageDown: -10, PageUp: 10 }
+        : { ArrowDown: -1, ArrowUp: 1, PageDown: -10, PageUp: 10 };
+      if (!(event.key in directions) && !(range && ['Home', 'End'].includes(event.key))) return;
+      event.preventDefault(); if (busy) { syncControls(); return; }
+      const value = Number(input.value), current = experiment.config[key], displayed = conditionDisplays.get(input);
+      const unchanged = value === current / multiplier || (displayed?.applied === current && value === displayed.value);
+      const base = input.value.trim() && Number.isFinite(value) && !unchanged ? value * multiplier : current;
+      const min = Number(input.min) * multiplier, max = Number(input.max) * multiplier;
+      const next = event.key === 'Home' ? min : event.key === 'End' ? max
+        : Math.max(min, Math.min(max, base + directions[event.key] * .01 * (event.shiftKey ? .1 : 1) * multiplier));
+      changeConfig({ [key]: next });
+    });
+  }
 }
 $('#play').addEventListener('click', togglePlay); $('#reset-phase').addEventListener('click', () => setProgress(0));
 $('#progress').addEventListener('input', event => setProgress(Number(event.target.value)));
@@ -176,9 +232,11 @@ for (const button of $$('[data-progress]')) button.addEventListener('click', () 
 $('#periapsis-button').addEventListener('click', () => setProgress(0)); $('#apoapsis-button').addEventListener('click', () => setProgress(50));
 $('#rate').addEventListener('change', event => { const value = Number(event.target.value); if (busy || ![5, 15, 30].includes(value)) { syncControls(); return; } syncTime(); daysPerSecond = value; if (running) resetAnchor(); refresh(); scheduleSave(); });
 for (const input of $$('[data-view]')) input.addEventListener('change', () => { if (busy) { syncControls(); return; } syncTime(); view[input.dataset.view] = input.checked; refresh(); scheduleSave(); });
-for (const button of $$('[data-camera]')) button.addEventListener('click', () => scene?.resetCamera(button.dataset.camera));
-$('#part-select').addEventListener('change', event => { if (busy) { syncControls(); return; } view.selectedPart = event.target.value; refresh(); scheduleSave(); });
-$('#focus-part').addEventListener('click', () => { scene?.focusPart(view.selectedPart); $('#toast').hidden = true; $('.observation').scrollIntoView({ block: 'start' }); }); $('#focus').addEventListener('click', toggleFocus);
+for (const button of $$('[data-camera]')) button.addEventListener('click', () => { scene?.endInspection?.(); scene?.resetCamera(button.dataset.camera); refresh(false); });
+$('#part-select').addEventListener('change', event => selectPart(event.target.value));
+$('#focus-part').addEventListener('click', () => { scene?.focusPart(view.selectedPart); refresh(false); $('#toast').hidden = true; $('.observation').scrollIntoView({ block: 'start' }); }); $('#focus').addEventListener('click', toggleFocus);
+$('#inspect-part').addEventListener('click', () => { if (scene?.getInspection?.()) endInspection(); else beginInspection(); });
+$('#end-inspection').addEventListener('click', endInspection);
 for (const button of $$('[data-lesson]')) button.addEventListener('click', () => startLesson(button.dataset.lesson));
 $('#guide-next').addEventListener('click', () => { if (busy) return; syncTime(); if (confirmObservation(guide, experiment, view, running)) { pause(); refresh(false); } });
 $('#guide-restart').addEventListener('click', () => { if (guide) startLesson(guide.id); }); $('#guide-exit').addEventListener('click', () => { guide = null; syncControls(); refresh(false); });
@@ -199,4 +257,11 @@ document.addEventListener('visibilitychange', () => { if (document.hidden) pause
 new ResizeObserver(drawChart).observe($('#speed-chart'));
 window.orbitLab = { getState: () => copy({ experiment, snapshot, view, daysPerSecond, comparison, running }), project: () => { syncTime(); return copy(capture()); },
   loadProject: raw => { const saved = parseProject(raw); remember(); readProject(saved); return copy(capture()); }, sceneDebug: () => scene?.getDebug() ?? null,
-  guide: () => copy(guide), chartDebug: () => copy(chart.debug), setProgress };
+  guide: () => copy(guide), chartDebug: () => copy(chart.debug), setProgress, getDetail: () => orbitDetail(snapshot),
+  getInspection: () => scene?.getInspection?.() ?? null, beginInspection, endInspection };
+window.render_game_to_text = () => JSON.stringify({ mode: running ? 'running' : 'paused', coordinateSystem: 'SI physics x,y maps to world x,0,-y in AU; velocity arrows 0.01 AU per km/s; acceleration marker direction only', snapshot, daysPerSecond, selectedPart: view.selectedPart, inspection: scene?.getInspection?.() ?? null, comparison: Boolean(comparison) });
+window.advanceTime = milliseconds => {
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) throw new RangeError('Expected nonnegative milliseconds');
+  pause(); experiment = advanceExperiment(experiment, (milliseconds / 1000 * daysPerSecond * DAY) % snapshot.periodS);
+  updateSnapshot(); refresh(); scheduleSave(); return copy(snapshot);
+};
