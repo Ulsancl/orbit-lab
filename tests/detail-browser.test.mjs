@@ -292,6 +292,38 @@ try {
     await page.reload(); await page.waitForFunction(() => window.orbitLab?.sceneDebug()?.ready);
     assert.deepEqual(await project(), saved);
   });
+  await check('native spinner baseline increments one unit while hidden right-edge controls preserve precision and explicit keyboard steps', async () => {
+    const saved = fixture({ experiment: { config: { semiMajorAxisM: .765432109876543 * AU, eccentricity: .345678901234567 }, meanAnomalyRad: .23456789012345 } });
+    const rightEdge = async id => {
+      const input = page.locator(`#${id}-number`); await input.scrollIntoViewIfNeeded(); await input.focus();
+      const bounds = await input.boundingBox(); assert.ok(bounds);
+      await page.mouse.move(bounds.x + bounds.width - 7, bounds.y + bounds.height * .25);
+      await page.mouse.click(bounds.x + bounds.width - 7, bounds.y + bounds.height * .25);
+      await input.press('Tab');
+    };
+    // Re-enable the legacy native UI only for this test's before/after probe.
+    // This must exercise a real pointer, not dispatchEvent or CSS-only evidence.
+    const native = await page.addStyleTag({ content: '.number-unit input[type=number]{appearance:auto!important;-moz-appearance:auto!important}.number-unit input[type=number]::-webkit-inner-spin-button,.number-unit input[type=number]::-webkit-outer-spin-button{-webkit-appearance:auto!important;display:inline-block!important;margin:0!important;opacity:1!important}' });
+    try {
+      await load(saved); const displayedAu = Number(await page.locator('#a-number').inputValue()); await rightEdge('a');
+      // Native stepping starts from the formatted DOM value, not the full SI value.
+      near((await state()).experiment.config.semiMajorAxisM, (displayedAu + 1) * AU, 1e-14, 1e-5);
+      await capture('native-spinner-before.png', '.controls');
+    } finally { await native.evaluate(element => element.remove()); }
+    for (const [id, key, factor] of [['a', 'semiMajorAxisM', AU], ['eccentricity', 'eccentricity', 1]]) {
+      await load(saved); await selectPart('velocity-vector'); await page.locator('#inspect-part').click(); const before = await project();
+      await rightEdge(id); assert.deepEqual(await project(), before); assert.equal((await inspection()).id, 'velocity-vector');
+      let expected = before.experiment.config[key];
+      for (const [pressed, delta] of [['ArrowUp', .01], ['Shift+ArrowDown', -.001], ['PageUp', .1]]) {
+        await page.locator(`#${id}-number`).press(pressed); expected += delta * factor;
+        near((await state()).experiment.config[key], expected, 1e-15, 1e-16);
+      }
+      const unchanged = await project(); await page.locator(`#${id}-number`).focus(); await page.keyboard.press('Tab'); assert.deepEqual(await project(), unchanged);
+      await page.locator(`#${id}`).press('ArrowRight'); expected += .01 * factor;
+      near((await state()).experiment.config[key], expected, 1e-15, 1e-16);
+    }
+    await load(saved); await capture('native-spinner-after.png', '.controls');
+  });
   await check('ten component fact tables preserve the original orbit, comparison and manual camera', async () => {
     await load(fixture()); const before = await project();
     for (const { id } of COMPONENTS) {

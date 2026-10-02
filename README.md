@@ -1,5 +1,7 @@
 # Orbit Lab
 
+1.1.1은 숫자 입력의 기본 스피너를 숨겨 클릭 시 조건이 1씩 바뀌는 문제를 수정합니다. 직접 입력·슬라이더·기존 키보드의 0.01 증분(Shift는 0.001)은 유지합니다.
+
 고정된 태양 주위의 이상적인 원·타원 궤도를 관찰하는 한국어 실험 앱입니다. 긴반지름과 이심률을 바꾸고, 같은 시간 배율에서 공전 속력·주기·쓸린 면적의 관계를 살펴봅니다.
 
 1.1은 원·타원 궤도의 관계를 직접 관찰하는 교육용 앱입니다. 설치 파일과 각 버전의 실제 검사 범위는 [릴리스 안내](https://github.com/Ulsancl/orbit-lab/releases/latest)에서 확인하세요. 수치·화면 검사는 외부 사용자 연구나 판매 적합성 인증을 뜻하지 않습니다.
@@ -52,7 +54,7 @@ npm run package:desktop
 
 개발 서버는 `127.0.0.1:5250`, 브라우저 검사는 `127.0.0.1:5251`을 사용하며 포트가 사용 중이면 새 서버 시작을 중단합니다. 위 명령 목록은 검사 결과를 의미하지 않습니다. 브라우저·네이티브 검사는 각각 별도로 실행합니다.
 
-Windows 설치 파일은 `release/windows/Orbit-Lab-Setup-1.1.0.exe`와 SHA-256 sidecar로 생성됩니다. 코드 서명과 자동 업데이트는 포함하지 않습니다. 브라우저·소스/패키지 네이티브 검사를 Windows CI에서 순차 실행하며, 실제 설치·업데이트와 실행 환경은 각 릴리스의 결과 기록에 별도로 남깁니다. [배포 안내](docs/distribution.md)에 설치와 자료 보존 범위를 정리했습니다.
+Windows 설치 파일은 `release/windows/Orbit-Lab-Setup-1.1.1.exe`와 SHA-256 sidecar로 생성됩니다. 코드 서명과 자동 업데이트는 포함하지 않습니다. 브라우저·소스/패키지 네이티브 검사를 Windows CI에서 순차 실행하며, 실제 설치·업데이트와 실행 환경은 각 릴리스의 결과 기록에 별도로 남깁니다. [배포 안내](docs/distribution.md)에 설치와 자료 보존 범위를 정리했습니다.
 
 [저장 방식](docs/storage.md) · [모형](docs/model.md) · [시각 요소](docs/anatomy.md) · [원리 출처](docs/references.md) · [개인정보](docs/privacy.md) · [문제 보고](docs/support.md) · [제3자 고지](docs/THIRD-PARTY-NOTICES.md)
 
