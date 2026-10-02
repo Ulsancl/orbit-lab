@@ -2,7 +2,7 @@
 
 고정된 태양 주위의 이상적인 원·타원 궤도를 관찰하는 한국어 실험 앱입니다. 긴반지름과 이심률을 바꾸고, 같은 시간 배율에서 공전 속력·주기·쓸린 면적의 관계를 살펴봅니다.
 
-1.0은 원·타원 궤도의 관계를 직접 관찰하는 교육용 앱입니다. 설치 파일과 각 버전의 실제 검사 범위는 [릴리스 안내](https://github.com/Ulsancl/orbit-lab/releases/latest)에서 확인하세요. 수치·화면 검사는 외부 사용자 연구나 판매 적합성 인증을 뜻하지 않습니다.
+1.1은 원·타원 궤도의 관계를 직접 관찰하는 교육용 앱입니다. 설치 파일과 각 버전의 실제 검사 범위는 [릴리스 안내](https://github.com/Ulsancl/orbit-lab/releases/latest)에서 확인하세요. 수치·화면 검사는 외부 사용자 연구나 판매 적합성 인증을 뜻하지 않습니다.
 
 ![Orbit Lab 기본 관찰 화면](docs/preview.png)
 
@@ -14,6 +14,8 @@
 - 한 궤도의 두 같은 시간 구간에 해당하는 곡선 면적과 해석식 면적.
 - 고정한 비교 궤도·위치와 현재 조건의 속력 및 주기 그래프. 두 궤도는 같은 AU 공간 축을 사용합니다.
 - 조건·공전 위치·비교·표시 상태·시점·배율을 담는 `.orbit.json` 파일과 브라우저 자동 저장.
+
+1.1.0에서는 방사·횡방향 속도와 태양 방향 가속도, 평균각 M·보조원각 E·실제 위치각 ν를 함께 읽습니다. 임시 구성보기에서 벡터 합과 각도 기준점을 확인하고 원래 카메라로 돌아갈 수 있습니다. 단위 질량당 에너지·각운동량과 근일점·원일점까지의 시간도 [상세 계측](docs/detail-refinement.md)에서 설명합니다.
 
 ## 처음 관찰하기
 
@@ -42,6 +44,7 @@ npm run build
 npm run test:browser
 npm run test:consumer
 npm run test:consumer-acceptance
+npm run test:detail
 npm run desktop
 npm run test:desktop
 npm run package:desktop
@@ -49,7 +52,7 @@ npm run package:desktop
 
 개발 서버는 `127.0.0.1:5250`, 브라우저 검사는 `127.0.0.1:5251`을 사용하며 포트가 사용 중이면 새 서버 시작을 중단합니다. 위 명령 목록은 검사 결과를 의미하지 않습니다. 브라우저·네이티브 검사는 각각 별도로 실행합니다.
 
-Windows 설치 파일은 `release/windows/Orbit-Lab-Setup-1.0.0.exe`와 SHA-256 sidecar로 생성됩니다. 코드 서명과 자동 업데이트는 포함하지 않습니다. 브라우저·소스/패키지 네이티브 검사를 Windows CI에서 순차 실행하며, 실제 설치·업데이트와 실행 환경은 각 릴리스의 결과 기록에 별도로 남깁니다. [배포 안내](docs/distribution.md)에 설치와 자료 보존 범위를 정리했습니다.
+Windows 설치 파일은 `release/windows/Orbit-Lab-Setup-1.1.0.exe`와 SHA-256 sidecar로 생성됩니다. 코드 서명과 자동 업데이트는 포함하지 않습니다. 브라우저·소스/패키지 네이티브 검사를 Windows CI에서 순차 실행하며, 실제 설치·업데이트와 실행 환경은 각 릴리스의 결과 기록에 별도로 남깁니다. [배포 안내](docs/distribution.md)에 설치와 자료 보존 범위를 정리했습니다.
 
 [저장 방식](docs/storage.md) · [모형](docs/model.md) · [시각 요소](docs/anatomy.md) · [원리 출처](docs/references.md) · [개인정보](docs/privacy.md) · [문제 보고](docs/support.md) · [제3자 고지](docs/THIRD-PARTY-NOTICES.md)
 
