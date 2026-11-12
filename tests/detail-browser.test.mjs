@@ -1,3 +1,4 @@
+import { artifactDirectory } from '../scripts/safe-files.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -8,7 +9,8 @@ import { getSnapshot } from '../src/model.js';
 import { createProject, serializeProject } from '../src/project.js';
 import { describeOrbitDetail } from '../src/detail-model.js';
 
-const root = path.resolve(import.meta.dirname, '..'), output = path.join(root, 'output/detail-browser');
+const root = path.resolve(import.meta.dirname, '..');
+const output = artifactDirectory(root, path.join(root, 'output/detail-browser'));
 const AU = 149597870700, MU = 1.32712440041279419e20, DAY = 86400, TAU = 2 * Math.PI;
 await fs.mkdir(output, { recursive: true });
 const server = await createServer({ root, server: { host: '127.0.0.1', port: 5332, strictPort: true, hmr: false } });

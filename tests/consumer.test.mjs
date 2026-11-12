@@ -1,3 +1,4 @@
+import { artifactDirectory } from '../scripts/safe-files.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -5,7 +6,8 @@ import { chromium } from 'playwright';
 import { createServer } from 'vite';
 import { PerspectiveCamera, Vector3 } from 'three';
 
-const root = path.resolve(import.meta.dirname, '..'), output = path.join(root, 'output/consumer');
+const root = path.resolve(import.meta.dirname, '..');
+const output = artifactDirectory(root, path.join(root, 'output/consumer'));
 const AU = 149597870700, MU = 1.32712440041279419e20;
 const checks = [], errors = [], externalRequests = [];
 const hardware = process.env.ORBIT_BROWSER_HARDWARE === '1';

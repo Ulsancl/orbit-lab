@@ -1,10 +1,12 @@
+import { artifactDirectory } from '../scripts/safe-files.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
-const root = path.resolve(import.meta.dirname, '..'), output = path.join(root, 'output/browser-integration');
+const root = path.resolve(import.meta.dirname, '..');
+const output = artifactDirectory(root, path.join(root, 'output/browser-integration'));
 const baseURL = 'http://127.0.0.1:5251/', storageKey = 'orbit-lab-project-v1';
 const AU = 149597870700, MU = 1.32712440041279419e20, DAY = 86400, TAU = 2 * Math.PI;
 const period = a => TAU * Math.sqrt((a * AU) ** 3 / MU);
