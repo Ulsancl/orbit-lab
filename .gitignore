@@ -4,3 +4,4 @@ release/
 output/
 *.log
 .DS_Store
+.security-stage-*
