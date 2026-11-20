@@ -49,21 +49,37 @@ function beginInspection(id = view.selectedPart) {
   requestAnimationFrame(() => $('.observation').scrollIntoView({ block: 'start' })); scheduleSave(); return true;
 }
 function endInspection() { scene?.endInspection?.(); refresh(); scheduleSave(); }
+// Bytes last read or written by this tab. A stale unload must not replace another tab's experiment.
+let lastStoredRaw = null;
 function saveLocal() {
-  clearTimeout(saveTimer); if (storageBlocked || restoring) return;
-  try { localStorage.setItem(STORAGE_KEY, serializeProject(capture())); text('#save-status', '이 기기에 자동 저장됨'); }
-  catch { text('#save-status', '자동 저장을 완료하지 못했습니다 · 파일로 보관하세요'); }
+  clearTimeout(saveTimer);
+  if (storageBlocked || restoring) return;
+  try {
+    const contents = serializeProject(capture()), stored = localStorage.getItem(STORAGE_KEY);
+    if (stored !== lastStoredRaw && stored !== contents) {
+      storageBlocked = true;
+      text('#save-status', '다른 탭에서 자동 저장이 변경됨 · 이 탭의 실험은 파일로 저장한 뒤 새로고침하세요');
+      return;
+    }
+    if (stored !== contents) localStorage.setItem(STORAGE_KEY, contents);
+    lastStoredRaw = contents;
+    text('#save-status', '이 기기에 자동 저장됨');
+  } catch { text('#save-status', '자동 저장을 완료하지 못했습니다 · 파일로 보관하세요'); }
 }
 function scheduleSave() { if (!restoring && !storageBlocked) { clearTimeout(saveTimer); saveTimer = setTimeout(saveLocal, 230); } }
 function protectOriginal(raw, future) {
   storageBlocked = true; recoveredRaw = raw;
-  try { localStorage.setItem(`${STORAGE_KEY}-original-${Date.now()}`, raw); } catch { /* Export remains available from memory. */ }
+  try {
+    const prefix = `${STORAGE_KEY}-original-`;
+    const backedUp = Object.keys(localStorage).some(k => k.startsWith(prefix) && localStorage.getItem(k) === raw);
+    if (!backedUp) localStorage.setItem(`${prefix}${Date.now()}`, raw);
+  } catch { /* The primary record and its in-memory download remain untouched. */ }
   $('#storage-recovery').hidden = false;
   if (future) text('#storage-recovery strong', '더 새로운 버전의 실험입니다. 원문을 보존합니다.');
   text('#save-status', '자동 저장 원문 보호 중 · 현재 실험은 파일로 보관하세요');
 }
 try {
-  const raw = localStorage.getItem(STORAGE_KEY);
+  const raw = localStorage.getItem(STORAGE_KEY); lastStoredRaw = raw;
   if (raw !== null) try { const saved = parseProject(raw); ({ experiment, comparison } = saved); ({ view, camera: initialCamera, daysPerSecond } = saved.observation); }
   catch (error) { protectOriginal(raw, error.futureVersion); }
 } catch { storageBlocked = true; text('#save-status', '자동 저장을 사용할 수 없습니다 · 파일로 보관하세요'); }
