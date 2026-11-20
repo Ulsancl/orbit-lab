@@ -1,7 +1,7 @@
 import './style.css';
 import { DEFAULT_CONFIG, ORBIT_CONSTANTS_SI, normalizeConfig, createExperiment, getSnapshot, advanceExperiment, wrapMeanAnomalyRad } from './model.js';
 import { createProject, parseProject, serializeProject, normalizeView, DEFAULT_VIEW } from './project.js';
-import { createBrowserAutosave, supportsAutosaveLock, withAutosaveLock, writeIfUnchanged } from './browser-autosave.js';
+import { createBrowserAutosave, supportsAutosaveLock, withAutosaveLock, writeIfUnchanged, readTabDraft, writeTabDraft, clearTabDraft } from './browser-autosave.js';
 import { COMPONENTS } from './geometry.js';
 import { OrbitScene } from './scene.js';
 import { OrbitChart } from './chart.js';
@@ -51,6 +51,8 @@ function beginInspection(id = view.selectedPart) {
 }
 function endInspection() { scene?.endInspection?.(); refresh(); scheduleSave(); }
 let lastStoredRaw = null, browserAutosave = null, guardArmed = false;
+let resumedTabDraft = false, interruptedTabDraft = null, tabDraftProtected = false;
+const draftStorage = () => sessionStorage;
 const getBrowserLocks = () => { try { return navigator.locks; } catch { return undefined; } };
 const currentProjectText = () => serializeProject(capture());
 const autosaveIssues = {
@@ -58,8 +60,18 @@ const autosaveIssues = {
   unavailable: ['이 환경에서는 안전한 자동 저장을 사용할 수 없어요.', '기존 자동 저장 기록을 덮어쓰지 않습니다. 변경한 실험은 아래에서 파일로 내려받으세요.', '안전한 자동 저장을 사용할 수 없음 · 파일로 보관하세요'],
   failed: ['자동 저장을 완료하지 못했어요.', '현재 실험을 잃지 않으려면 아래에서 파일로 내려받으세요.', '자동 저장을 완료하지 못했습니다 · 파일로 보관하세요'],
 };
+function rememberBrowserDraft() {
+  try {
+    const draft = browserAutosave.unsavedDraft();
+    // This is private to the current tab and survives a reload, not a safe
+    // replacement for a project file if the tab/browser is closed.
+    if (draft && !restoring && !tabDraftProtected) writeTabDraft(draftStorage, STORAGE_KEY, draft);
+    return Boolean(draft);
+  } catch { return true; }
+}
 function warnOnUnsavedExit(event) {
-  try { if (!running && !browserAutosave.hasUnsavedChanges()) return; } catch { /* The current experiment could not be checked. */ }
+  const dirty = rememberBrowserDraft();
+  if (!running && !dirty) return;
   event.preventDefault();
   event.returnValue = true;
 }
@@ -72,8 +84,9 @@ function disarmUnloadGuard() {
   guardArmed = false;
   window.removeEventListener('beforeunload', warnOnUnsavedExit);
 }
-function reportAutosave(status) {
+function reportAutosave(status, contents) {
   if (status === 'saved' || status === 'unchanged') {
+    if (!desktop && !tabDraftProtected) clearTabDraft(draftStorage, STORAGE_KEY, contents);
     if (!running) disarmUnloadGuard();
     $('#autosave-recovery').hidden = true;
     text('#save-status', status === 'saved' ? '이 기기에 자동 저장됨' : '자동 저장할 변경 없음');
@@ -115,7 +128,9 @@ function scheduleSave() {
   clearTimeout(saveTimer); saveTimer = setTimeout(saveLocal, 230);
 }
 function flushBrowserOnHide() {
-  if (guardArmed && !restoring && !storageBlocked && browserAutosave?.canSave()) {
+  if (!guardArmed || restoring || !browserAutosave) return;
+  rememberBrowserDraft();
+  if (!storageBlocked && browserAutosave.canSave()) {
     clearTimeout(saveTimer);
     void browserAutosave.flush();
   }
@@ -138,11 +153,43 @@ function protectOriginal(raw, future) {
   if (future) text('#storage-recovery strong', '더 새로운 버전의 실험입니다. 원문을 보존합니다.');
   text('#save-status', '자동 저장 원문 보호 중 · 현재 실험은 파일로 보관하세요');
 }
+function applyRestoredProject(saved) {
+  ({ experiment, comparison } = saved);
+  ({ view, camera: initialCamera, daysPerSecond } = saved.observation);
+}
 try {
   const raw = localStorage.getItem(STORAGE_KEY); lastStoredRaw = raw;
-  if (raw !== null) try { const saved = parseProject(raw); ({ experiment, comparison } = saved); ({ view, camera: initialCamera, daysPerSecond } = saved.observation); }
+  if (raw !== null) try { applyRestoredProject(parseProject(raw)); }
   catch (error) { protectOriginal(raw, error.futureVersion); }
 } catch { storageBlocked = true; reportAutosave('unavailable'); }
+function restoreTabDraft() {
+  if (desktop) return;
+  // Even if a new tab inherited sessionStorage from an opener, it must not
+  // silently reapply that draft to the shared experiment.
+  const reloading = performance.getEntriesByType?.('navigation')?.[0]?.type === 'reload';
+  const draft = readTabDraft(draftStorage, STORAGE_KEY);
+  if (!draft) return;
+  if (draft.contents === lastStoredRaw) {
+    clearTabDraft(draftStorage, STORAGE_KEY, draft.contents);
+    return;
+  }
+  try {
+    const saved = parseProject(draft.contents);
+    if (reloading && !draft.interrupted && !storageBlocked && draft.expected === lastStoredRaw
+        && supportsAutosaveLock(getBrowserLocks())) {
+      applyRestoredProject(saved);
+      resumedTabDraft = true;
+    } else {
+      // The latest shared version remains the active experiment. Hold the old
+      // tab draft apart, even if the primary value later returns to old bytes.
+      interruptedTabDraft = draft.contents;
+      tabDraftProtected = true;
+      writeTabDraft(draftStorage, STORAGE_KEY, { ...draft, interrupted: true });
+      $('#tab-draft-recovery').hidden = false;
+    }
+  } catch { clearTabDraft(draftStorage, STORAGE_KEY, draft.contents); }
+}
+restoreTabDraft();
 updateSnapshot();
 
 function resetAnchor(now = performance.now()) { anchor = { experiment: copy(experiment), at: now, daysPerSecond }; }
@@ -261,7 +308,17 @@ function downloadBrowserProject(contents, filename) {
   // The browser owns the download prompt; this records the snapshot offered
   // to it, not a guarantee that the user kept the file.
   browserAutosave.markExported(contents);
+  if (!tabDraftProtected) clearTabDraft(draftStorage, STORAGE_KEY);
   if (!running) disarmUnloadGuard();
+}
+function exportInterruptedTabDraft() {
+  if (busy || interruptedTabDraft === null) return;
+  try {
+    browserDownload(interruptedTabDraft, projectFilename('-interrupted'));
+    if (tabDraftProtected) clearTabDraft(draftStorage, STORAGE_KEY, interruptedTabDraft);
+    tabDraftProtected = false;
+    toast('내려받은 복구 사본을 확인하세요.');
+  } catch (error) { toast(`내려받지 못했습니다. ${error.message}`); }
 }
 function exportUnsavedProject() {
   if (busy) return;
@@ -295,9 +352,10 @@ syncControls(); refresh(); if (!initialCamera) scene?.resetCamera();
 if (!desktop) {
   browserAutosave = createBrowserAutosave({
     key: STORAGE_KEY, storage: () => localStorage, locks: getBrowserLocks(), expected: lastStoredRaw,
-    baseline: currentProjectText(), capture: currentProjectText, onStatus: reportAutosave,
+    baseline: resumedTabDraft ? null : currentProjectText(), capture: currentProjectText, onStatus: reportAutosave,
   });
   if (!storageBlocked && !browserAutosave.canSave()) reportAutosave('unavailable');
+  else if (resumedTabDraft) saveLocal();
 }
 for (const [id, key, multiplier] of [['a', 'semiMajorAxisM', AU], ['eccentricity', 'eccentricity', 1]]) {
   const applyValue = event => {
@@ -347,6 +405,7 @@ for (const button of $$('[data-chart-mode]')) button.addEventListener('click', (
 $('#new-project').addEventListener('click', newExperiment);
 $('#undo-new').addEventListener('click', () => { if (!previous || busy) return; const saved = previous; previous = null; readProject(saved.project, saved.guide); $('#undo-new').hidden = true; toast('직전 실험을 복원했습니다.'); });
 $('#export-unsaved-project').addEventListener('click', exportUnsavedProject);
+$('#export-interrupted-draft').addEventListener('click', exportInterruptedTabDraft);
 $('#save-project').addEventListener('click', saveFile); $('#open-project').addEventListener('click', openFile);
 $('#project-file').addEventListener('change', async event => { const file = event.target.files?.[0]; if (!file || busy) return; setBusy(true);
   try { if (file.size > 10 * 1024 * 1024) throw new Error('실험 파일은 10 MiB 이하여야 합니다.'); const saved = parseProject(await file.text()); remember(); readProject(saved); toast('저장한 궤도 실험을 복원했습니다.'); }
@@ -356,11 +415,11 @@ $('#recover-original').addEventListener('click', () => { if (recoveredRaw !== nu
 $('#help').addEventListener('click', help); $('#close-help').addEventListener('click', () => $('#help-dialog').close());
 desktop?.onCommand(command => { if (busy) return; const commands = { 'new-project': newExperiment, 'open-project': openFile, 'save-project': saveFile, 'toggle-play': togglePlay, focus: toggleFocus, help }; commands[command]?.(); });
 if (desktop) window.addEventListener('beforeunload', () => { syncTime(); saveLocal(); });
-else window.addEventListener('pagehide', () => { if (running) pause(); else flushBrowserOnHide(); });
+else window.addEventListener('pagehide', () => { if (running) pause(); flushBrowserOnHide(); });
 document.addEventListener('visibilitychange', () => {
   if (!document.hidden) return;
   if (desktop || running) pause();
-  else flushBrowserOnHide();
+  if (!desktop) flushBrowserOnHide();
 });
 new ResizeObserver(drawChart).observe($('#speed-chart'));
 window.orbitLab = { getState: () => copy({ experiment, snapshot, view, daysPerSecond, comparison, running }), project: () => { syncTime(); return copy(capture()); },
