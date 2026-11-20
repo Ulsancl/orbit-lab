@@ -17,7 +17,7 @@ export class OrbitChart {
     for (const value of [0, 50, 100, 150]) { svg.append(el('line', { x1: left, x2: w - right, y1: y(value), y2: y(value), stroke: colors.grid }), el('text', { x: left - 8, y: y(value) + 3, fill: colors.text, 'font-size': 10, 'text-anchor': 'end' }, value)); }
     for (const value of [0, .25, .5, .75, 1]) svg.append(el('text', { x: x(value), y: h - 18, fill: colors.text, 'font-size': 10, 'text-anchor': 'middle' }, `${value * 100}%`));
     svg.append(el('text', { x: left, y: 11, fill: colors.text, 'font-size': 10 }, 'km/s'), el('text', { x: w - right, y: h - 1, fill: colors.text, 'font-size': 9, 'text-anchor': 'end' }, '한 바퀴의 시간 진행률 t/T'));
-    const series = [];
+    const series = [], markers = [];
     const draw = (snapshot, kind) => {
       if (!snapshot || (mode !== 'both' && mode !== kind)) return;
       const samples = this.samples(snapshot.config);
@@ -25,10 +25,12 @@ export class OrbitChart {
       const path = points.map((point, index) => `${index ? 'L' : 'M'}${point.x.toFixed(3)},${point.y.toFixed(3)}`).join(' ');
       svg.append(el('path', { d: path, fill: 'none', stroke: colors[kind], 'stroke-width': 2, ...(kind === 'saved' ? { 'stroke-dasharray': '6 5' } : {}), 'data-series': kind }));
       const progress = snapshot.meanAnomalyRad / (2 * Math.PI), speedKmS = snapshot.speedMps / 1000, px = x(progress), py = y(speedKmS);
-      const marker = kind === 'saved' ? el('path', { d: `M${px},${py - 5} l5,5 l-5,5 l-5,-5 Z`, fill: colors[kind], stroke: '#101a2f', 'stroke-width': 1.5, 'data-marker': kind }) : el('circle', { cx: px, cy: py, r: 4.5, fill: colors[kind], stroke: '#101a2f', 'stroke-width': 1.5, 'data-marker': kind });
-      svg.append(marker); series.push({ kind, path, points, marker: { progress, speedKmS, x: px, y: py } });
+      const marker = kind === 'saved' ? el('path', { d: `M${px},${py - 8} l8,8 l-8,8 l-8,-8 Z`, fill: 'none', stroke: colors[kind], 'stroke-width': 1.8, 'data-marker': kind }) : el('circle', { cx: px, cy: py, r: 4.5, fill: colors[kind], stroke: '#101a2f', 'stroke-width': 1.5, 'data-marker': kind });
+      markers.push(marker); series.push({ kind, path, points, marker: { progress, speedKmS, x: px, y: py } });
     };
-    draw(saved, 'saved'); draw(current, 'current'); this.speedContainer.replaceChildren(svg);
+    // A solid line painted last hides an identical dashed orbit. Draw the dashes
+    // over the current line, then place both markers above the paths.
+    draw(current, 'current'); draw(saved, 'saved'); svg.append(...markers); this.speedContainer.replaceChildren(svg);
     const pw = Math.max(290, this.periodContainer.clientWidth), ph = 90, barLeft = 44, barRight = 65, axisWidth = pw - barLeft - barRight;
     const psvg = el('svg', { viewBox: `0 0 ${pw} ${ph}`, 'aria-hidden': 'true' }), bars = [];
     for (const value of [0, 550, 1100]) { const xx = barLeft + axisWidth * value / 1100; psvg.append(el('line', { x1: xx, x2: xx, y1: 8, y2: 64, stroke: colors.grid }), el('text', { x: xx, y: 82, fill: colors.text, 'font-size': 10, 'text-anchor': 'middle' }, `${value}일`)); }

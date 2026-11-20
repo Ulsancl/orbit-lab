@@ -60,6 +60,38 @@ try {
   page = await context.newPage(); page.setDefaultTimeout(20000); watch(page);
   await page.goto(baseURL); await page.waitForFunction(() => window.orbitLab?.sceneDebug()?.ready);
 
+  await check('a stale tab cannot overwrite a newer saved comparison on unload', async () => {
+    const tabs = await browser.newContext({ viewport: { width: 1200, height: 900 } });
+    const key = 'orbit-lab-project-v1';
+    const open = async () => {
+      const tab = await tabs.newPage();
+      await tab.goto(page.url());
+      await tab.waitForFunction(() => window.orbitLab?.getState());
+      return tab;
+    };
+    const flush = tab => tab.evaluate(() => { window.dispatchEvent(new Event('beforeunload')); });
+    const stored = tab => tab.evaluate(key => localStorage.getItem(key), key);
+    try {
+      const writer = await open();
+      await flush(writer);
+      const stale = await open();
+      assert.equal(await stale.evaluate(() => window.orbitLab.getState().comparison), null);
+      await writer.locator('#pin-comparison').click();
+      await flush(writer);
+      const newer = await stored(writer);
+      assert.ok(JSON.parse(newer).comparison);
+      await flush(stale);
+      assert.equal(await stored(stale), newer);
+      assert.match(await stale.locator('#save-status').innerText(), /다른 (?:창|탭)/);
+      // This tab still owns its in-memory work and may export it separately.
+      assert.equal(await stale.evaluate(() => window.orbitLab.project().comparison), null);
+      assert.equal(await stale.locator('#save-project').isEnabled(), true);
+      await stale.reload();
+      await stale.waitForFunction(() => window.orbitLab?.getState().comparison);
+      assert.deepEqual(await stale.evaluate(() => window.orbitLab.getState().comparison), JSON.parse(newer).comparison);
+    } finally { await tabs.close(); }
+  });
+
   await check('initial orbit is paused, uses a Sun focus and ten observable targets, and has no idle redraw loop', async () => {
     const initial = await state(); assert.equal(initial.running, false); assert.equal(initial.daysPerSecond, 15);
     assert.deepEqual(initial.experiment, { config: { semiMajorAxisM: AU, eccentricity: .35 }, meanAnomalyRad: 0 });
@@ -155,6 +187,13 @@ try {
 
   await check('frozen comparison keeps its own physical position and graphs retain common fixed axes', async () => {
     await conditions(1,0); await progress(0); await page.locator('#pin-comparison').click(); const saved=(await state()).comparison;
+    const drawn = await page.locator('#speed-chart [data-series], #speed-chart [data-marker]').evaluateAll(nodes =>
+      nodes.map(node => [node.dataset.series ? 'line' : 'marker', node.dataset.series ?? node.dataset.marker,
+        node.getAttribute('d'), node.getAttribute('stroke-dasharray'), node.getAttribute('fill')]));
+    assert.deepEqual(drawn.map(([type, kind]) => [type, kind]), [['line','current'], ['line','saved'], ['marker','current'], ['marker','saved']]);
+    assert.equal(drawn[0][2], drawn[1][2], 'newly pinned speed curves coincide');
+    assert.ok(drawn[1][3], 'saved dashes reveal the solid curve through the gaps');
+    assert.equal(drawn[3][4], 'none', 'the diamond does not cover the current circle');
     await conditions(2,0); await progress(50); assert.deepEqual((await state()).comparison,saved);
     const mesh=await debug(); vector(mesh.savedPositionWorld,[1,0,0]); vector(mesh.orbiterWorld,[-2,0,0]);
     const plot=await chart(); assert.deepEqual(plot.progressAxis,[0,1]); assert.deepEqual(plot.speedAxisKmS,[0,150]); assert.deepEqual(plot.periodAxisDays,[0,1100]);
@@ -179,6 +218,11 @@ try {
       const isolated=await browser.newContext({viewport:{width:1200,height:900},acceptDownloads:true});
       try{const other=await isolated.newPage();watch(other);await other.addInitScript(({key,raw})=>{if(location.hostname==='127.0.0.1')localStorage.setItem(key,raw);},{key:storageKey,raw});await other.goto(baseURL);await other.waitForFunction(()=>window.orbitLab?.sceneDebug()?.ready&&!document.querySelector('#storage-recovery').hidden);
         await other.locator('#eccentricity-number').fill('.5');await other.locator('#eccentricity-number').press('Tab');await other.locator('[data-progress="25"]').click();await other.waitForTimeout(300);assert.equal(await other.evaluate(key=>localStorage.getItem(key),storageKey),raw);
+        await other.reload();
+        await other.waitForFunction(() => window.orbitLab && !document.querySelector('#storage-recovery').hidden);
+        const backups = await other.evaluate(() => Object.keys(localStorage)
+          .filter(key => key.startsWith('orbit-lab-project-v1-original-')).map(key => localStorage.getItem(key)));
+        assert.deepEqual(backups, [raw], 'reloading the same protected original must not consume another quota entry');
         const pending=other.waitForEvent('download');await other.locator('#recover-original').click();const file=path.join(output,`${name}-original.txt`);await(await pending).saveAs(file);assert.equal(await fs.readFile(file,'utf8'),raw);
       }finally{await isolated.close();}
     }
