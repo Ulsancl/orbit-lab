@@ -54,7 +54,7 @@ npm run package:desktop
 
 개발 서버는 `127.0.0.1:5250`, 브라우저 검사는 `127.0.0.1:5251`을 사용하며 포트가 사용 중이면 새 서버 시작을 중단합니다. 위 명령 목록은 검사 결과를 의미하지 않습니다. 브라우저·네이티브 검사는 각각 별도로 실행합니다.
 
-Windows 설치 파일은 `release/windows/Orbit-Lab-Setup-1.1.1.exe`와 SHA-256 sidecar로 생성됩니다. 코드 서명과 자동 업데이트는 포함하지 않습니다. 브라우저·소스/패키지 네이티브 검사를 Windows CI에서 순차 실행하며, 실제 설치·업데이트와 실행 환경은 각 릴리스의 결과 기록에 별도로 남깁니다. [배포 안내](docs/distribution.md)에 설치와 자료 보존 범위를 정리했습니다.
+Windows 설치 파일은 `release/windows/Orbit-Lab-Setup-1.1.2.exe`와 SHA-256 sidecar로 생성됩니다. 코드 서명과 자동 업데이트는 포함하지 않습니다. 브라우저·소스/패키지 네이티브 검사를 Windows CI에서 순차 실행하며, 실제 설치·업데이트와 실행 환경은 각 릴리스의 결과 기록에 별도로 남깁니다. [배포 안내](docs/distribution.md)에 설치와 자료 보존 범위를 정리했습니다.
 
 [저장 방식](docs/storage.md) · [모형](docs/model.md) · [시각 요소](docs/anatomy.md) · [원리 출처](docs/references.md) · [개인정보](docs/privacy.md) · [문제 보고](docs/support.md) · [제3자 고지](docs/THIRD-PARTY-NOTICES.md)
 
