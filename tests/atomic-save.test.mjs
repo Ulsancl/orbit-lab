@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import { atomicWriteProject, WINDOWS_RETRY_DELAYS_MS } from '../desktop/atomic-save.cjs';
+import { windowsPowerShell, windowsPowerShellEnv } from '../desktop/windows-save.cjs';
 
 const previous = '{"original":"보존할 실험"}', replacement = '{"replacement":"완료된 실험"}';
 const scratchRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'output', 'atomic-save-tests');
@@ -96,4 +98,83 @@ test('a failed flush closes and removes the incomplete sibling without touching 
   await assert.rejects(atomicWriteProject(value.target, replacement, { operations, validateTarget: value.validateTarget }), { code: 'EIO' });
   assert.equal(closed, true); assert.equal(renamed, false);
   await unchangedAndClean(value);
+});
+
+test('a preexisting sibling stays untouched when exclusive creation fails', async t => {
+  const value = await fixture(t);
+  let existingSibling;
+  const operations = {
+    ...fs,
+    async open(filename, flags, mode) {
+      existingSibling = filename;
+      assert.equal(mode, 0o600);
+      await fs.writeFile(filename, 'existing sibling');
+      return fs.open(filename, flags, mode);
+    },
+  };
+  await assert.rejects(atomicWriteProject(value.target, replacement, { operations, validateTarget: value.validateTarget }), { code: 'EEXIST' });
+  assert.equal(await fs.readFile(existingSibling, 'utf8'), 'existing sibling');
+  assert.equal(await fs.readFile(value.target, 'utf8'), previous);
+});
+
+test('native saves create private files and preserve a distinct Windows destination DACL', async t => {
+  const { directory, target } = await fixture(t);
+  const newTarget = path.join(directory, '새 실험 [검사].json');
+  const validateTarget = async filename => {
+    try { assert.ok((await fs.lstat(filename)).isFile()); }
+    catch (error) { if (error.code !== 'ENOENT') throw error; }
+  };
+
+  const runPowerShell = script => {
+    const command = Buffer.from("$ErrorActionPreference = 'Stop'\n" + script, 'utf16le').toString('base64');
+    const result = spawnSync(windowsPowerShell(), ['-NoProfile', '-NonInteractive', '-EncodedCommand', command], {
+      encoding: 'utf8', env: windowsPowerShellEnv({ ORBIT_ACL_EXISTING: target, ORBIT_ACL_NEW: newTarget }),
+    });
+    if (result.error) throw result.error;
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  const readDacl = "[IO.File]::GetAccessControl($env:ORBIT_ACL_EXISTING).GetSecurityDescriptorSddlForm('Access')";
+  let originalDacl;
+  if (process.platform === 'win32') {
+    originalDacl = runPowerShell(`
+      $acl = [IO.File]::GetAccessControl($env:ORBIT_ACL_EXISTING)
+      $acl.SetAccessRuleProtection($true, $false)
+      $user = [Security.Principal.WindowsIdentity]::GetCurrent().User
+      $anonymous = [Security.Principal.SecurityIdentifier]::new('S-1-5-7')
+      $acl.SetAccessRule([Security.AccessControl.FileSystemAccessRule]::new($user, 'FullControl', 'Allow'))
+      $acl.AddAccessRule([Security.AccessControl.FileSystemAccessRule]::new($anonymous, 'ReadData', 'Deny'))
+      [IO.File]::SetAccessControl($env:ORBIT_ACL_EXISTING, $acl)
+      ${readDacl}
+    `);
+    assert.match(originalDacl, /^D:P.*\(D;/);
+  }
+
+  await atomicWriteProject(newTarget, replacement, { validateTarget });
+  await atomicWriteProject(target, replacement, { validateTarget });
+  assert.equal(await fs.readFile(newTarget, 'utf8'), replacement);
+  assert.equal(await fs.readFile(target, 'utf8'), replacement);
+  assert.deepEqual((await fs.readdir(directory)).sort(), ['experiment.json', '새 실험 [검사].json']);
+  if (process.platform === 'win32') {
+    assert.equal(runPowerShell(readDacl), originalDacl);
+    const isPrivate = runPowerShell(`
+      $acl = [IO.File]::GetAccessControl($env:ORBIT_ACL_NEW)
+      $rules = $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])
+      $user = [Security.Principal.WindowsIdentity]::GetCurrent().User
+      $rules.Count -eq 1 -and $rules[0].IdentityReference -eq $user
+    `);
+    assert.equal(isPrivate, 'True');
+
+    await fs.chmod(target, 0o444);
+    try {
+      await assert.rejects(atomicWriteProject(target, previous, { validateTarget }), /실험 파일을 저장할 수 없습니다/);
+      assert.equal(await fs.readFile(target, 'utf8'), replacement);
+      assert.equal(runPowerShell(readDacl), originalDacl);
+      assert.deepEqual((await fs.readdir(directory)).sort(), ['experiment.json', '새 실험 [검사].json']);
+    } finally {
+      await fs.chmod(target, 0o600);
+    }
+  } else {
+    for (const filename of [newTarget, target]) assert.equal((await fs.stat(filename)).mode & 0o077, 0);
+  }
 });

@@ -4,7 +4,10 @@ import { DEFAULT_VIEW, COMPONENTS } from './geometry.js';
 export { DEFAULT_VIEW };
 export const projectType = 'orbit-lab-project', projectVersion = 1, projectModelVersion = MODEL_VERSION;
 export const DEFAULT_DAYS_PER_SECOND = 15;
-const speeds = [5, 15, 30], MAX_BYTES = 10 * 1024 * 1024;
+export const MAX_PROJECT_BYTES = 10 * 1024 * 1024;
+const MAX_PROJECT_JSON_LENGTH = 64 * 1024;
+const MAX_PROJECT_JSON_DEPTH = 16;
+const speeds = [5, 15, 30];
 const flags = ['orbit', 'geometry', 'velocity', 'equalAreas', 'labels'];
 const parts = new Set(COMPONENTS.map(part => part.id));
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -95,10 +98,42 @@ export function createProject(input = {}) {
   return { type: projectType, schemaVersion: projectVersion, modelVersion: MODEL_VERSION, experiment, comparison,
     observation: { view: normalizeView(value.view), camera, daysPerSecond: speeds.includes(value.daysPerSecond) ? value.daysPerSecond : DEFAULT_DAYS_PER_SECOND } };
 }
-export function parseProject(text) {
+export function checkProjectTextSize(text) {
   if (typeof text !== 'string') fail('실험 파일은 JSON 텍스트여야 합니다.', 'INVALID_JSON');
-  if (text.length > MAX_BYTES || new TextEncoder().encode(text).byteLength > MAX_BYTES) fail('실험 파일은 10 MiB 이하여야 합니다.', 'PROJECT_TOO_LARGE');
-  let value; try { value = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text); } catch { fail('JSON 실험 파일을 읽을 수 없습니다.', 'INVALID_JSON'); }
+  if (text.length > MAX_PROJECT_BYTES ||
+      (text.length * 3 > MAX_PROJECT_BYTES && new TextEncoder().encode(text).byteLength > MAX_PROJECT_BYTES)) {
+    fail('실험 파일은 10 MiB 이하여야 합니다.', 'PROJECT_TOO_LARGE');
+  }
+}
+
+function checkJsonWork(text) {
+  // Preserve whitespace-padded legacy files while bounding allocations and
+  // nesting before JSON.parse. Whitespace inside quoted values counts.
+  let depth = 0, length = 0, quoted = false, escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const code = text.charCodeAt(i);
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (code === 92) escaped = true;
+      else if (code === 34) quoted = false;
+    } else {
+      if (code === 32 || code === 9 || code === 10 || code === 13) continue;
+      if (code === 34) quoted = true;
+      if (code === 123 || code === 91) depth++;
+      if (code === 125 || code === 93) depth--;
+    }
+    if (++length > MAX_PROJECT_JSON_LENGTH || depth > MAX_PROJECT_JSON_DEPTH) {
+      fail('실험 파일의 JSON 내용이 너무 크거나 깊습니다.', 'PROJECT_TOO_COMPLEX');
+    }
+    if (depth < 0) fail('JSON 실험 파일을 읽을 수 없습니다.', 'INVALID_JSON');
+  }
+}
+
+export function parseProject(text) {
+  checkProjectTextSize(text);
+  const json = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+  checkJsonWork(json);
+  let value; try { value = JSON.parse(json); } catch { fail('JSON 실험 파일을 읽을 수 없습니다.', 'INVALID_JSON'); }
   return validateProject(value);
 }
 export function serializeProject(project) { return JSON.stringify(validateProject(project), null, 2); }

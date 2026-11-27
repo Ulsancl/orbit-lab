@@ -6,13 +6,16 @@ import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
+import { isDeepStrictEqual } from 'node:util';
 import { _electron as electron } from 'playwright';
 import { createProject } from '../src/project.js';
+import { buildWeb } from '../scripts/build-web.mjs';
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const expectedVersion = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8')).version;
 const packaged = !!process.env.ORBIT_DESKTOP_EXE;
+if (!packaged) await buildWeb(root, path.join(root, 'output', 'desktop-test-bundle'), { testHooks: true });
 const executablePath = packaged ? process.env.ORBIT_DESKTOP_EXE : require('electron');
 assert.ok(path.isAbsolute(executablePath), 'The tested executable must be an absolute path');
 const output = artifactDirectory(root, path.join(root, 'output', `${packaged ? 'desktop-packaged' : 'desktop'}-v${expectedVersion}`));
@@ -20,12 +23,12 @@ await fs.mkdir(output, { recursive: true });
 const profile = await fs.mkdtemp(path.join(output, 'profile-'));
 const evidence = path.join(profile, 'test-artifacts');
 await fs.mkdir(evidence);
-const env = { ...process.env, ORBIT_LAB_DATA_DIR: profile };
+const env = { ...process.env, ORBIT_LAB_DATA_DIR: profile, ORBIT_DESKTOP_TEST: '1' };
 delete env.ELECTRON_RUN_AS_NODE;
 const projectPath = path.join(evidence, '궤도 관찰.orbit.json');
 const checks = [], errors = [], remoteRequests = [], processes = [];
 const defaultProfilePath = process.platform === 'win32' && process.env.APPDATA ? path.join(process.env.APPDATA, 'Orbit Lab') : null;
-let app, page, saved, windowRestoration, gpu, failure, defaultProfile;
+let app, page, saved, windowRestoration, gpu, failure, profileBefore, defaultProfile;
 const state = () => page.evaluate(() => window.orbitLab.getState());
 const project = () => page.evaluate(() => window.orbitLab.project());
 async function profileManifest(directory) {
@@ -85,7 +88,7 @@ async function launch() {
   assert.equal((await state()).running, false, 'Each launch restores a paused experiment');
  
   assert.equal(await app.evaluate(({ app }) => app.getPath('userData')), profile);
-  if (defaultProfilePath) assert.equal(await app.evaluate(({ app }) => app.getPath('appData')), process.env.APPDATA);
+  if (defaultProfilePath) assert.ok(await app.evaluate(({ app }) => app.getPath('appData')) === process.env.APPDATA, 'The platform profile base must stay unchanged');
   processRecord.processIds = await app.evaluate(({ app }) => app.getAppMetrics().map(value => value.pid));
   await app.evaluate(({ BrowserWindow }) => { const window = BrowserWindow.getAllWindows()[0]; window.setTitle('Orbit Lab · 자동 검사'); window.focus(); });
 }
@@ -135,20 +138,21 @@ async function stableBounds(label) {
 }
 
 try {
-  defaultProfile = { path: defaultProfilePath, before: await profileManifest(defaultProfilePath) };
+  try { profileBefore = await profileManifest(defaultProfilePath); }
+  catch { throw new Error('Unable to check the default profile before verification'); }
   await launch();
   await check('isolated Orbit Lab identity, offline bundle, sandbox and native bridge', async () => {
     assert.equal(page.url(), 'app://orbit/');
     const identity = await app.evaluate(({ app, BrowserWindow }) => {
       const p = BrowserWindow.getAllWindows()[0].webContents.getLastWebPreferences();
       return { name: app.name, version: app.getVersion(), userData: app.getPath('userData'), sandbox: p.sandbox,
-        contextIsolation: p.contextIsolation, nodeIntegration: p.nodeIntegration };
+        contextIsolation: p.contextIsolation, nodeIntegration: p.nodeIntegration, webviewTag: p.webviewTag };
     });
     assert.deepEqual(identity, { name: 'Orbit Lab', version: expectedVersion, userData: profile,
-      sandbox: true, contextIsolation: true, nodeIntegration: false });
+      sandbox: true, contextIsolation: true, nodeIntegration: false, webviewTag: false });
     const bridge = await page.evaluate(() => ({ keys: Object.keys(window.orbitDesktop).sort(), native: window.orbitDesktop.isDesktop,
       node: typeof window.require, process: typeof window.process, others: [typeof window.soundDesktop, typeof window.thermalDesktop, typeof window.lensDesktop, typeof window.motorDesktop, typeof window.hydraulicDesktop, typeof window.engineDesktop, typeof window.brakeDesktop] }));
-    assert.deepEqual(bridge, { keys: ['isDesktop', 'onCommand', 'openProject', 'saveProject', 'setBusy'],
+    assert.deepEqual(bridge, { keys: ['exportOriginal', 'isDesktop', 'onCommand', 'openProject', 'saveProject', 'setBusy'],
       native: true, node: 'undefined', process: 'undefined', others: ['undefined', 'undefined', 'undefined', 'undefined', 'undefined', 'undefined', 'undefined'] });
     assert.deepEqual(errors, []); assert.deepEqual(remoteRequests, []);
     const access = await page.evaluate(async () => ({
@@ -327,11 +331,15 @@ try {
     const linked = path.join(evidence, 'linked-directory'), originalDirectory = path.join(evidence, 'real-directory');
     await fs.mkdir(originalDirectory); await fs.writeFile(path.join(originalDirectory, 'observation.json'), original);
     await fs.symlink(originalDirectory, linked, process.platform === 'win32' ? 'junction' : 'dir');
-    for (const file of [originalDirectory, path.join(linked, 'observation.json')]) {
-      await openDialog(file); await freshToast(() => page.locator('#open-project').click(), '못|실패|지원|파일');
-      sameProject(await project(), before);
-      await saveDialog(file); await freshToast(() => page.locator('#save-project').click(), '못|실패|지원|파일');
-      sameProject(await project(), before);
+    try {
+      for (const file of [originalDirectory, path.join(linked, 'observation.json')]) {
+        await openDialog(file); await freshToast(() => page.locator('#open-project').click(), '못|실패|지원|파일');
+        sameProject(await project(), before);
+        await saveDialog(file); await freshToast(() => page.locator('#save-project').click(), '못|실패|지원|파일');
+        sameProject(await project(), before);
+      }
+    } finally {
+      await fs.unlink(linked);
     }
     assert.equal(await fs.readFile(path.join(originalDirectory, 'observation.json'), 'utf8'), original);
     assert.equal(await fs.readFile(projectPath, 'utf8'), original);
@@ -423,14 +431,15 @@ try {
     await page.reload();
     await page.waitForFunction(() => window.orbitLab?.project && !document.querySelector('#storage-recovery').hidden);
     const target = path.join(evidence, 'recovered-original.txt');
-    await app.evaluate(({ session }, filename) => {
-      globalThis.orbitDownload = null;
-      session.defaultSession.once('will-download', (_event, item) => {
-        item.setSavePath(filename); item.once('done', (_event, status) => { globalThis.orbitDownload = status; });
-      });
-    }, target);
-    await page.locator('#recover-original').click();
-    await waitFor(() => app.evaluate(() => globalThis.orbitDownload === 'completed'), 'native original download');
+    await saveDialog(target, true);
+    await freshToast(() => page.locator('#recover-original').click(), '원문 저장을 취소');
+    await assert.rejects(fs.access(target), { code: 'ENOENT' });
+    const unexpectedExtension = path.join(evidence, 'recovered-original.json');
+    await saveDialog(unexpectedExtension);
+    await freshToast(() => page.locator('#recover-original').click(), '확장자');
+    await assert.rejects(fs.access(unexpectedExtension), { code: 'ENOENT' });
+    await saveDialog(target);
+    await freshToast(() => page.locator('#recover-original').click(), '원문을 보관');
     assert.equal(await fs.readFile(target, 'utf8'), raw);
     assert.ok(await page.evaluate(value => Object.keys(localStorage).some(key => key.startsWith('orbit-lab-project-v1-original-') && localStorage.getItem(key) === value), raw));
     await page.locator('#eccentricity').fill('0.61'); await delay(280);
@@ -451,15 +460,16 @@ try {
     await page?.evaluate(() => window.orbitDesktop?.setBusy(false)).catch(() => {});
     await closeNormally().catch(error => { failure ??= error; process.exitCode = 1; });
   }
-  if (defaultProfile) {
+  if (profileBefore !== undefined) {
+    let unchanged = false;
     try {
-      defaultProfile.after = await profileManifest(defaultProfilePath);
-      assert.deepEqual(defaultProfile.after, defaultProfile.before, 'The real default profile must remain untouched');
-      defaultProfile.unchanged = true;
-    } catch (error) { defaultProfile.unchanged = false; failure ??= error; process.exitCode = 1; }
+      unchanged = isDeepStrictEqual(await profileManifest(defaultProfilePath), profileBefore);
+    } catch { /* Keep private profile details out of the report even on errors. */ }
+    defaultProfile = { unchanged };
+    if (!unchanged) { failure ??= new Error('The real default profile could not be confirmed unchanged'); process.exitCode = 1; }
   }
   await fs.writeFile(path.join(output, 'result.json'), JSON.stringify({ status: failure ? 'FAILED' : 'PASSED', version: expectedVersion,
-    packaged, executablePath, profile, evidence, checks, errors, remoteRequests, processes, defaultProfile, windowRestoration, gpu,
+    packaged, executable: path.relative(root, executablePath), checks, errors, remoteRequests, processes, defaultProfile, windowRestoration, gpu,
     ...(failure ? { failure: failure.message } : {}) }, null, 2));
   console.log(`Desktop validation: ${checks.length} checks ${failure ? 'completed before failure' : 'passed'}.`);
 }

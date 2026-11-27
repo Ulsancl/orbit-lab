@@ -1,7 +1,7 @@
 import './style.css';
 import './condition-controls.css';
 import { CONFIG_LIMITS_SI, DEFAULT_CONFIG, ORBIT_CONSTANTS_SI, normalizeConfig, createExperiment, getSnapshot, advanceExperiment, wrapMeanAnomalyRad } from './model.js';
-import { createProject, parseProject, serializeProject, normalizeView, DEFAULT_VIEW } from './project.js';
+import { createProject, parseProject, serializeProject, normalizeView, DEFAULT_VIEW, MAX_PROJECT_BYTES } from './project.js';
 import { createBrowserAutosave, supportsAutosaveLock, withAutosaveLock, writeIfUnchanged, readTabDraft, writeTabDraft, clearTabDraft } from './browser-autosave.js';
 import { COMPONENTS } from './geometry.js';
 import { OrbitScene } from './scene.js';
@@ -351,10 +351,15 @@ function exportInterruptedTabDraft() {
   if (busy || interruptedTabDraft === null) return;
   try {
     browserDownload(interruptedTabDraft, projectFilename('-interrupted'));
-    if (tabDraftProtected) clearTabDraft(draftStorage, STORAGE_KEY, interruptedTabDraft);
-    tabDraftProtected = false;
     toast('내려받은 복구 사본을 확인하세요.');
   } catch (error) { toast(`내려받지 못했습니다. ${error.message}`); }
+}
+function discardInterruptedTabDraft() {
+  if (busy || interruptedTabDraft === null || !window.confirm('이 탭에 남은 이전 실험의 복구 사본을 지울까요?')) return;
+  clearTabDraft(draftStorage, STORAGE_KEY, interruptedTabDraft);
+  interruptedTabDraft = null;
+  tabDraftProtected = false;
+  $('#tab-draft-recovery').hidden = true;
 }
 function exportUnsavedProject() {
   if (busy) return;
@@ -375,8 +380,17 @@ async function saveFile() {
 }
 async function openFile() {
   if (busy) return; pause(); if (!desktop) { $('#project-file').click(); return; } setBusy(true);
-  try { const result = await desktop.openProject(); if (result.canceled) { toast('열기를 취소했습니다. 현재 실험은 유지합니다.'); return; } const saved = parseProject(result.content); remember(); readProject(saved); toast('저장한 궤도 실험을 복원했습니다.'); }
+  try { const result = await desktop.openProject(); if (result.canceled) { toast('열기를 취소했습니다. 현재 실험은 유지합니다.'); return; } remember(); readProject(result.project); toast('저장한 궤도 실험을 복원했습니다.'); }
   catch (error) { toast(`열지 못했습니다. ${error.message}`); } finally { setBusy(false); }
+}
+async function exportOriginal() {
+  if (busy || recoveredRaw === null) return;
+  if (!desktop) { browserDownload(recoveredRaw, 'orbit-lab-original.txt', 'text/plain;charset=utf-8'); return; }
+  setBusy(true);
+  try {
+    const result = await desktop.exportOriginal(recoveredRaw);
+    toast(result.canceled ? '원문 저장을 취소했습니다.' : '자동 저장 원문을 보관했습니다.');
+  } catch (error) { toast(`원문을 저장하지 못했습니다. ${error.message}`); } finally { setBusy(false); }
 }
 function toggleFocus() { document.body.classList.toggle('focus-mode'); text('#focus', document.body.classList.contains('focus-mode') ? '실험 화면으로' : '3D 크게 보기'); $('.observation').scrollIntoView({ block: 'start' }); }
 function help() { pause(); $('#help-dialog').showModal(); }
@@ -472,12 +486,13 @@ $('#new-project').addEventListener('click', newExperiment);
 $('#undo-new').addEventListener('click', () => { if (!previous || busy) return; const saved = previous; previous = null; readProject(saved.project, saved.guide); $('#undo-new').hidden = true; toast('직전 실험을 복원했습니다.'); });
 $('#export-unsaved-project').addEventListener('click', exportUnsavedProject);
 $('#export-interrupted-draft').addEventListener('click', exportInterruptedTabDraft);
+$('#discard-interrupted-draft').addEventListener('click', discardInterruptedTabDraft);
 $('#save-project').addEventListener('click', saveFile); $('#open-project').addEventListener('click', openFile);
 $('#project-file').addEventListener('change', async event => { const file = event.target.files?.[0]; if (!file || busy) return; setBusy(true);
-  try { if (file.size > 10 * 1024 * 1024) throw new Error('실험 파일은 10 MiB 이하여야 합니다.'); const saved = parseProject(await file.text()); remember(); readProject(saved); toast('저장한 궤도 실험을 복원했습니다.'); }
+  try { if (file.size > MAX_PROJECT_BYTES) throw new Error('실험 파일은 10 MiB 이하여야 합니다.'); const saved = parseProject(await file.text()); remember(); readProject(saved); toast('저장한 궤도 실험을 복원했습니다.'); }
   catch (error) { toast(`열지 못했습니다. ${error.message}`); } finally { event.target.value = ''; setBusy(false); }
 });
-$('#recover-original').addEventListener('click', () => { if (recoveredRaw !== null) browserDownload(recoveredRaw, 'orbit-lab-original.txt', 'text/plain;charset=utf-8'); });
+$('#recover-original').addEventListener('click', exportOriginal);
 $('#help').addEventListener('click', help); $('#close-help').addEventListener('click', () => $('#help-dialog').close());
 desktop?.onCommand(command => { if (busy) return; const commands = { 'new-project': newExperiment, 'open-project': openFile, 'save-project': saveFile, 'toggle-play': togglePlay, focus: toggleFocus, help }; commands[command]?.(); });
 if (desktop) window.addEventListener('beforeunload', () => { syncTime(); saveLocal(); });
@@ -490,13 +505,15 @@ document.addEventListener('visibilitychange', () => {
 const chartResize = new ResizeObserver(drawChart);
 chartResize.observe($('#speed-chart'));
 chartResize.observe($('#radius-chart'));
-window.orbitLab = { getState: () => copy({ experiment, snapshot, view, daysPerSecond, comparison, running }), project: () => { syncTime(); return copy(capture()); },
-  loadProject: raw => { const saved = parseProject(raw); remember(); readProject(saved); return copy(capture()); }, sceneDebug: () => scene?.getDebug() ?? null,
-  guide: () => copy(guide), chartDebug: () => copy(chart.debug), setProgress, getDetail: () => orbitDetail(snapshot),
-  getInspection: () => scene?.getInspection?.() ?? null, beginInspection, endInspection };
-window.render_game_to_text = () => JSON.stringify({ mode: running ? 'running' : 'paused', coordinateSystem: 'SI physics x,y maps to world x,0,-y in AU; velocity arrows 0.01 AU per km/s; acceleration marker direction only', snapshot, daysPerSecond, selectedPart: view.selectedPart, inspection: scene?.getInspection?.() ?? null, comparison: Boolean(comparison) });
-window.advanceTime = milliseconds => {
-  if (!Number.isFinite(milliseconds) || milliseconds < 0) throw new RangeError('Expected nonnegative milliseconds');
-  pause(); experiment = advanceExperiment(experiment, (milliseconds / 1000 * daysPerSecond * DAY) % snapshot.periodS);
-  updateSnapshot(); refresh(); scheduleSave(); return copy(snapshot);
-};
+if (__ORBIT_TEST_BUILD__) {
+  window.orbitLab = { getState: () => copy({ experiment, snapshot, view, daysPerSecond, comparison, running }), project: () => { syncTime(); return copy(capture()); },
+    loadProject: raw => { const saved = parseProject(raw); remember(); readProject(saved); return copy(capture()); }, sceneDebug: () => scene?.getDebug() ?? null,
+    guide: () => copy(guide), chartDebug: () => copy(chart.debug), setProgress, getDetail: () => orbitDetail(snapshot),
+    getInspection: () => scene?.getInspection?.() ?? null, beginInspection, endInspection };
+  window.render_game_to_text = () => JSON.stringify({ mode: running ? 'running' : 'paused', coordinateSystem: 'SI physics x,y maps to world x,0,-y in AU; velocity arrows 0.01 AU per km/s; acceleration marker direction only', snapshot, daysPerSecond, selectedPart: view.selectedPart, inspection: scene?.getInspection?.() ?? null, comparison: Boolean(comparison) });
+  window.advanceTime = milliseconds => {
+    if (!Number.isFinite(milliseconds) || milliseconds < 0) throw new RangeError('Expected nonnegative milliseconds');
+    pause(); experiment = advanceExperiment(experiment, (milliseconds / 1000 * daysPerSecond * DAY) % snapshot.periodS);
+    updateSnapshot(); refresh(); scheduleSave(); return copy(snapshot);
+  };
+}
