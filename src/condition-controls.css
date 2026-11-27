@@ -1,0 +1,24 @@
+.timeline-phase,
+.phase-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.timeline-phase {
+  justify-content: space-between;
+  flex-wrap: wrap;
+}
+
+.timeline-phase .range-label {
+  margin: 0;
+}
+
+.phase-entry > label {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.phase-entry input[type=number] {
+  width: 10ch;
+}

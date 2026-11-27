@@ -6,12 +6,14 @@ import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { sampleOrbit, getSweptSector } from './model.js';
 import { COMPONENTS, DEFAULT_VIEW, GEOMETRY as G, physicalToWorld, velocityVectorEnd, orbitLandmarks, makeSectorFan, triangleAreaSum, orbitVectorConstruction, anomalyConstruction } from './geometry.js';
 import { updateLinePoints, arrowConeGeometry } from './geometry-meshes.js';
+import { particleSurfaces, skySurface, solarCorona, solarMaterial, solarSurface, starField } from './scene-appearance.js';
 import './scene.css';
 
 const V = values => new THREE.Vector3(...values);
 const clean = value => Object.is(value, -0) ? 0 : value;
 const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
-const color = { current: '#87d9ff', saved: '#ffc783', geometry: '#90a7c2', velocity: '#87d9ff', radial: '#f0a58e', transverse: '#a7deb1', acceleration: '#d8b5ff', mean: '#87d9ff', eccentric: '#ffc783', true: '#a7deb1', areaA: '#4baacf', areaB: '#b690e4' };
+const color = { current: '#86c9ff', saved: '#ffc783', geometry: '#90a7c2', velocity: '#71efdb', radial: '#f0a58e', transverse: '#bfdf89', acceleration: '#d8b5ff', mean: '#87d9ff', eccentric: '#ffc783', true: '#a7deb1', areaA: '#4baacf', areaB: '#b690e4' };
+const timeDivisions = 16;
 
 export class OrbitScene {
   constructor(container, { onSelect = () => {}, onCameraChange = () => {} } = {}) {
@@ -24,7 +26,7 @@ export class OrbitScene {
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping; this.renderer.toneMappingExposure = 1.05;
     this.renderer.domElement.setAttribute('aria-label', '고정 중심체 주위의 타원 궤도, 속도 벡터와 같은 시간의 면적');
     this.renderer.domElement.tabIndex = 0; container.append(this.renderer.domElement);
-    this.scene = new THREE.Scene(); this.scene.background = new THREE.Color('#07111f');
+    this.scene = new THREE.Scene(); this.scene.background = new THREE.Color('#050a16');
     this.camera = new THREE.PerspectiveCamera(38, 1, .008, 150);
     // Constant up vector permits an exact +Y plane-normal preset without an
     // OrbitControls polar singularity. Camera files therefore need no up field.
@@ -36,9 +38,8 @@ export class OrbitScene {
       if (!this.updating && !this.disposed) { this.boundCamera(); this.render(); this.onCameraChange(this.getProjectCameraState()); }
     };
     this.controls.addEventListener('change', this.controlChange);
-    this.scene.add(new THREE.AmbientLight('#a6bed7', .8));
-    const sunLight = new THREE.PointLight('#ffe3ac', 8, 0, 1); this.scene.add(sunLight);
-    const fill = new THREE.DirectionalLight('#89baff', .8); fill.position.set(2, 4, -3); this.scene.add(fill);
+    this.reflectance = new THREE.DirectionalLight('#fff0da', 2.6);
+    this.scene.add(this.reflectance, new THREE.HemisphereLight('#b2cef4', '#466086', .54));
     this.root = new THREE.Group(); this.scene.add(this.root);
     for (const part of COMPONENTS) { const node = new THREE.Group(); node.name = part.id; node.userData.partId = part.id; this.root.add(node); this.parts.set(part.id, { ...part, node, anchor: new THREE.Vector3() }); }
     this.buildSpace(); this.buildBodies(); this.buildGeometry(); this.buildConstructions(); this.buildOverlay(); this.buildPointer();
@@ -59,46 +60,54 @@ export class OrbitScene {
     if (object.geometry) { this.geometries.delete(object.geometry); object.geometry.dispose(); }
     this.geometries.add(geometry); object.geometry = geometry;
   }
-  texture(canvas) { const texture = new THREE.CanvasTexture(canvas); texture.colorSpace = THREE.SRGBColorSpace; this.textures.add(texture); return texture; }
-  radialTexture() {
-    const canvas = document.createElement('canvas'); canvas.width = canvas.height = 128; const context = canvas.getContext('2d');
-    const gradient = context.createRadialGradient(64, 64, 0, 64, 64, 64);
-    gradient.addColorStop(0, '#fff7daff'); gradient.addColorStop(.28, '#ffd38e66'); gradient.addColorStop(.6, '#ffb45a13'); gradient.addColorStop(1, '#ffb45a00');
-    context.fillStyle = gradient; context.fillRect(0, 0, 128, 128); return this.texture(canvas);
-  }
-  bodyTexture(sun) {
-    const canvas = document.createElement('canvas'); canvas.width = 512; canvas.height = 256; const context = canvas.getContext('2d');
-    const image = context.createImageData(512, 256);
-    for (let y = 0; y < 256; y++) for (let x = 0; x < 512; x++) {
-      const u = x / 512 * Math.PI * 2, v = y / 256 * Math.PI;
-      const fine = Math.sin(u * 43 + Math.sin(v * 37) * 2) * Math.sin(v * 61 + Math.cos(u * 19));
-      const bands = Math.sin(v * 18 + Math.sin(u * 5) * .8), n = .5 + .16 * bands + .12 * fine;
-      const base = sun ? [255, 143 + 65 * n, 42 + 73 * n] : [29 + 24 * n, 83 + 34 * n, 110 + 49 * n];
-      const offset = (y * 512 + x) * 4; for (let k = 0; k < 3; k++) image.data[offset + k] = base[k]; image.data[offset + 3] = 255;
-    }
-    context.putImageData(image, 0, 0); return this.texture(canvas);
+  texture(canvas, colorSpace = THREE.SRGBColorSpace) {
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.colorSpace = colorSpace; texture.wrapS = THREE.RepeatWrapping;
+    this.textures.add(texture); return texture;
   }
   buildSpace() {
-    let seed = 982451653; const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed / 4294967296; };
-    const positions = [], colors = [];
-    for (let i = 0; i < 420; i++) {
-      const azimuth = random() * Math.PI * 2, cos = random() * 2 - 1, radius = 18 + random() * 10, sin = Math.sqrt(1 - cos * cos);
-      positions.push(radius * sin * Math.cos(azimuth), radius * cos, radius * sin * Math.sin(azimuth));
-      const intensity = .16 + random() ** 3 * .6; colors.push(intensity * .78, intensity * .87, intensity);
-    }
-    const geometry = new THREE.BufferGeometry(); geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3)); geometry.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3)); this.geometries.add(geometry);
-    const material = new THREE.PointsMaterial({ size: 1.3, sizeAttenuation: false, vertexColors: true, transparent: true, opacity: .8, depthWrite: false, toneMapped: false }); this.materials.add(material);
-    this.stars = new THREE.Points(geometry, material); this.stars.frustumCulled = false; this.scene.add(this.stars);
-    this.grid = new THREE.GridHelper(8, 16, '#203d56', '#14283e'); this.grid.material.transparent = true; this.grid.material.opacity = .38;
+    this.sky = new THREE.Group(); this.scene.add(this.sky);
+    const domeMaterial = this.material({ map: this.texture(skySurface()), side: THREE.BackSide, depthWrite: false, toneMapped: false }, true);
+    const dome = this.mesh(new THREE.SphereGeometry(111, 48, 32), domeMaterial, this.sky);
+    dome.frustumCulled = false; dome.renderOrder = -20;
+    this.stars = starField(this.renderer.getPixelRatio()); this.sky.add(this.stars);
+    this.geometries.add(this.stars.geometry); this.materials.add(this.stars.material);
+    this.grid = new THREE.GridHelper(8, 16, '#35546d', '#2b4059'); this.grid.material.transparent = true; this.grid.material.opacity = .19;
     this.grid.material.depthWrite = false; this.grid.position.y = -.008; this.scene.add(this.grid); this.geometries.add(this.grid.geometry); this.materials.add(this.grid.material);
   }
-  wideLine(parent, points, { lineColor = color.geometry, width = 1.4, dashed = false, opacity = 1 } = {}) {
+  wideLine(parent, points, { lineColor = color.geometry, width = 1.4, dashed = false, opacity = 1, vertexColors = false } = {}) {
     const geometry = new LineGeometry(); geometry.setPositions(points.flat()); this.geometries.add(geometry);
-    const material = new LineMaterial({ color: lineColor, linewidth: width, dashed, dashSize: .05, gapSize: .035, transparent: opacity < 1, opacity, depthWrite: false, toneMapped: false });
+    const material = new LineMaterial({ color: lineColor, linewidth: width, dashed, dashSize: .05, gapSize: .035, transparent: opacity < 1, opacity, vertexColors, depthWrite: false, toneMapped: false });
     this.materials.add(material); this.wideMaterials.add(material);
     const line = new Line2(geometry, material); line.userData.baseLineWidth = width; line.computeLineDistances(); parent.add(line); return line;
   }
   setLine(line, points) { if (updateLinePoints(line, points)) return; const geometry = new LineGeometry(); geometry.setPositions(points.flat()); this.replaceGeometry(line, geometry); line.computeLineDistances(); }
+  setTrack(line, samples, centerX, semiMajorAU) {
+    this.setLine(line, samples.map(sample => physicalToWorld(sample.positionM)));
+    if (!line.geometry.hasAttribute('instanceColorStart')) {
+      const count = line.geometry.getAttribute('instanceStart').count;
+      line.geometry.setColors(new Float32Array((count + 1) * 3).fill(1));
+      line.geometry.getAttribute('instanceColorStart').data.setUsage(THREE.DynamicDrawUsage);
+    }
+    line.userData.depth = { centerX, semiMajorAU, cameraX: null, cameraZ: null };
+  }
+  shadeTrack(line) {
+    const depth = line.userData.depth;
+    if (!depth || !line.parent.visible) return;
+    const matrix = this.camera.matrixWorldInverse.elements, x = matrix[2], z = matrix[10];
+    if (depth.cameraX === x && depth.cameraZ === z) return;
+    depth.cameraX = x; depth.cameraZ = z;
+    const starts = line.geometry.getAttribute('instanceStart'), ends = line.geometry.getAttribute('instanceEnd');
+    const colors = line.geometry.getAttribute('instanceColorStart').data;
+    // Camera-facing depth shades the existing AU vertices in place.
+    for (let i = 0; i < starts.count; i++) {
+      const start = ((starts.getX(i) - depth.centerX) * x + starts.getZ(i) * z) / depth.semiMajorAU;
+      const end = ((ends.getX(i) - depth.centerX) * x + ends.getZ(i) * z) / depth.semiMajorAU;
+      colors.array.fill(.74 + .26 * clamp(start, -1, 1), i * 6, i * 6 + 3);
+      colors.array.fill(.74 + .26 * clamp(end, -1, 1), i * 6 + 3, i * 6 + 6);
+    }
+    colors.needsUpdate = true;
+  }
   wideArrow(parent, lineColor, width = 2.2) {
     const arrow = new THREE.Group(); parent.add(arrow);
     arrow.line = this.wideLine(arrow, [[0,0,0],[0,1,0]], { lineColor, width });
@@ -117,23 +126,35 @@ export class OrbitScene {
     return this.mesh(geometry, this.material({ color: colorValue, toneMapped: false }, true), parent, position);
   }
   buildBodies() {
-    this.sun = this.mesh(new THREE.SphereGeometry(G.centralSymbolRadiusWorld, 48, 32), this.material({ map: this.bodyTexture(true), toneMapped: false }, true), this.node('central-body'));
-    const haloMaterial = new THREE.SpriteMaterial({ map: this.radialTexture(), color: '#ffcc83', transparent: true, opacity: .45, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }); this.materials.add(haloMaterial);
-    this.halo = new THREE.Sprite(haloMaterial); this.halo.scale.setScalar(.16); this.node('central-body').add(this.halo);
-    this.orbiter = this.mesh(new THREE.SphereGeometry(G.particleSymbolRadiusWorld, 32, 24), this.material({ map: this.bodyTexture(false), roughness: .68, metalness: .05, emissive: '#0f3545', emissiveIntensity: .35 }), this.node('orbiter'));
-    this.selectionOrbiter = this.ring(this.node('orbiter'), .032, '#99e7ff', [0, 0, 0], .0018);
-    this.selectionSun = this.ring(this.node('central-body'), .068, '#ffdda4', [0, 0, 0], .0018);
+    const sunMaterial = solarMaterial(this.texture(solarSurface())); this.materials.add(sunMaterial);
+    this.sun = this.mesh(new THREE.SphereGeometry(G.centralSymbolRadiusWorld, 56, 40), sunMaterial, this.node('central-body'));
+    const haloMaterial = new THREE.SpriteMaterial({ map: this.texture(solarCorona()), transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, toneMapped: false }); this.materials.add(haloMaterial);
+    this.halo = new THREE.Sprite(haloMaterial); this.halo.scale.setScalar(.222); this.node('central-body').add(this.halo);
+    const surfaces = particleSurfaces();
+    this.orbiter = this.mesh(new THREE.SphereGeometry(G.particleSymbolRadiusWorld, 48, 32), this.material({
+      map: this.texture(surfaces.color), bumpMap: this.texture(surfaces.bump, THREE.NoColorSpace), bumpScale: .0014, roughness: .93,
+    }), this.node('orbiter'));
+    this.selectionOrbiter = this.ring(this.node('orbiter'), .032, '#99e7ff', [0, 0, 0], .00085);
+    this.selectionSun = this.ring(this.node('central-body'), .068, '#ffdda4', [0, 0, 0], .00085);
     this.savedGroup = new THREE.Group(); this.root.add(this.savedGroup);
     this.savedMarker = this.mesh(new THREE.OctahedronGeometry(.023), this.material({ color: color.saved, wireframe: true, toneMapped: false }, true), this.savedGroup);
-    this.savedPath = this.wideLine(this.savedGroup, [[0,0,0],[1,0,0]], { lineColor: color.saved, width: 1.6, dashed: true }); this.savedGroup.visible = false;
+    this.savedPath = this.wideLine(this.savedGroup, [[0,0,0],[1,0,0]], { lineColor: color.saved, width: 2, dashed: true, opacity: .97, vertexColors: true });
+    this.savedPath.renderOrder = 2; this.savedGroup.visible = false;
   }
   buildGeometry() {
-    this.orbitPath = this.wideLine(this.node('orbit-path'), [[0,0,0],[1,0,0]], { lineColor: color.current, width: 2.1 });
+    this.orbitPath = this.wideLine(this.node('orbit-path'), [[0,0,0],[1,0,0]], { lineColor: color.current, width: 2.25, vertexColors: true });
+    const tickGeometry = new THREE.BufferGeometry();
+    tickGeometry.setAttribute('position', new THREE.BufferAttribute(new Float32Array(timeDivisions * 6), 3).setUsage(THREE.DynamicDrawUsage));
+    const tickMaterial = new THREE.LineBasicMaterial({ color: '#abcfe9', transparent: true, opacity: .8, depthWrite: false, toneMapped: false });
+    this.timeTicks = new THREE.LineSegments(tickGeometry, tickMaterial);
+    this.timeTicks.renderOrder = 1; this.node('orbit-path').add(this.timeTicks);
+    this.geometries.add(tickGeometry); this.materials.add(tickMaterial);
     this.centerMarker = this.mesh(new THREE.OctahedronGeometry(.018), this.material({ color: '#b5c7da', wireframe: true, toneMapped: false }, true), this.node('ellipse-center'));
     this.secondMarker = this.ring(this.node('second-focus'), .024, '#b0bbd4', [0,0,0], .002);
     this.semiAxis = this.wideLine(this.node('semimajor-axis'), [[0,0,0],[1,0,0]], { lineColor: '#b7c4d5', dashed: true, width: 1.4 });
     this.axisTicks = [0,1].map(() => this.wideLine(this.node('semimajor-axis'), [[0,0,-.025],[0,0,.025]], { lineColor: '#c1cddc', width: 1.5 }));
-    this.radiusLine = this.wideLine(this.node('radius-line'), [[0,0,0],[1,0,0]], { lineColor: '#79b4cc', width: 1.2, opacity: .82 });
+    this.radiusLine = this.wideLine(this.node('radius-line'), [[0,0,0],[1,0,0]], { lineColor: '#82a0bc', width: 1.25, dashed: true, opacity: .75 });
+    this.radiusLine.material.dashSize = .035; this.radiusLine.material.gapSize = .023;
     this.periMarker = this.ring(this.node('apsides'), .028, '#e5ba87', [0,0,0], .0026);
     this.apoMarker = this.ring(this.node('apsides'), .028, '#8bb7eb', [0,0,0], .0026);
     this.velocity = this.wideArrow(this.node('velocity-vector'), color.velocity);
@@ -187,12 +208,28 @@ export class OrbitScene {
       this.eccentricPoint.position.set(...d.eccentricPoint); this.meanTimePoint.position.set(...d.meanTimePoint); this.positionPoint.position.set(...d.position);
     }
   }
+  updateTimeTicks() {
+    const geometry = this.timeTicks.geometry, points = geometry.getAttribute('position');
+    const stride = G.orbitSamples / timeDivisions;
+    for (let tick = 0; tick < timeDivisions; tick++) {
+      const i = tick * stride;
+      const [x, , z] = physicalToWorld(this.samples[i].positionM);
+      const before = this.samples[(i + G.orbitSamples - 1) % G.orbitSamples].positionM;
+      const after = this.samples[i + 1].positionM;
+      const dx = after.x - before.x, dy = after.y - before.y, length = Math.hypot(dx, dy);
+      const nx = dy / length, nz = dx / length;
+      points.setXYZ(tick * 2, x, 0, z);
+      points.setXYZ(tick * 2 + 1, x + nx * .025, 0, z + nz * .025);
+    }
+    points.needsUpdate = true; geometry.computeBoundingSphere();
+  }
   applyStatic(snapshot) {
     const key = JSON.stringify(snapshot.config);
     if (key === this.configKey) return;
     this.configKey = key; this.samples = sampleOrbit(snapshot.config, { sampleCount: G.orbitSamples });
-    this.setLine(this.orbitPath, this.samples.map(sample => physicalToWorld(sample.positionM)));
     this.landmarks = orbitLandmarks(snapshot); const L = this.landmarks;
+    this.setTrack(this.orbitPath, this.samples, L.center[0], snapshot.config.semiMajorAxisM / G.astronomicalUnitM);
+    this.updateTimeTicks();
     this.centerMarker.position.set(...L.center); this.secondMarker.position.set(...L.secondFocus);
     this.periMarker.position.set(...L.periapsis); this.apoMarker.position.set(...L.apoapsis);
     this.setLine(this.semiAxis, [L.center, L.periapsis]);
@@ -218,6 +255,9 @@ export class OrbitScene {
       this.applyStatic(snapshot);
       const position = physicalToWorld(snapshot.positionM), end = velocityVectorEnd(snapshot.positionM, snapshot.velocityMps);
       this.orbiter.position.set(...position); this.selectionOrbiter.position.set(...position); this.anchor('orbiter', position);
+      // The terminator follows the model's inward radial direction. Light
+      // intensity and surface detail are controlled for legibility.
+      this.reflectance.position.copy(this.orbiter.position).normalize().negate();
       this.setLine(this.radiusLine, [[0,0,0], position]); this.anchor('radius-line', V(position).multiplyScalar(.5));
       this.setArrow(this.velocity, position, end);
       this.anchor('velocity-vector', end);
@@ -228,7 +268,11 @@ export class OrbitScene {
       this.savedGroup.visible = !!comparisonSnapshot && this.view.orbit;
       if (comparisonSnapshot) {
         const key = JSON.stringify(comparisonSnapshot.config);
-        if (key !== this.savedConfigKey) { this.savedConfigKey = key; this.setLine(this.savedPath, sampleOrbit(comparisonSnapshot.config, { sampleCount: G.orbitSamples }).map(sample => physicalToWorld(sample.positionM))); }
+        if (key !== this.savedConfigKey) {
+          this.savedConfigKey = key;
+          const config = comparisonSnapshot.config, semiMajorAU = config.semiMajorAxisM / G.astronomicalUnitM;
+          this.setTrack(this.savedPath, sampleOrbit(config, { sampleCount: G.orbitSamples }), -semiMajorAU * config.eccentricity, semiMajorAU);
+        }
         this.savedMarker.position.set(...physicalToWorld(comparisonSnapshot.positionM));
       }
       this.selectionOrbiter.visible = this.view.selectedPart === 'orbiter'; this.selectionSun.visible = this.view.selectedPart === 'central-body';
@@ -251,11 +295,13 @@ export class OrbitScene {
   applyInspectionVisibility() {
     const definition = this.inspection && this.inspectionDefinition(this.inspection.id);
     this.motionGroup.visible = definition?.kind === 'motion'; this.angleGroup.visible = definition?.kind === 'anomalies';
+    this.timeTicks.visible = !definition && this.view.geometry;
+    this.sky.visible = this.halo.visible = !definition;
     if (definition) {
       for (const [id, part] of this.parts) part.node.visible = definition.parts.includes(id);
       this.node('ellipse-center').visible &&= !this.landmarks.circular; this.node('second-focus').visible &&= !this.landmarks.circular;
-      this.grid.visible = this.stars.visible = this.savedGroup.visible = this.halo.visible = false;
-    } else { this.stars.visible = this.halo.visible = true; }
+      this.grid.visible = this.savedGroup.visible = false;
+    }
   }
   currentInspectionCenter() { return this.inspection?.kind === 'motion' ? this.orbiter.position.clone() : V(this.landmarks.center); }
   trackInspection() {
@@ -295,15 +341,24 @@ export class OrbitScene {
       halo.classList.add('orbit-leader-halo'); line.classList.add('orbit-leader-line'); dot.setAttribute('r','3'); this.svg.append(halo,line,dot); this.overlay.append(button);
       this.labels.set(part.id, { button, halo, line, dot });
     }
-    this.scaleNote = document.createElement('div'); this.scaleNote.className = 'orbit-scale-note'; this.scaleNote.textContent = '천체 크기 확대 · 궤도 좌표는 동일 AU 축척';
-    this.vectorNote = document.createElement('div'); this.vectorNote.className = 'orbit-vector-note'; this.vectorNote.textContent = '속도 화살표: 10 km/s → 0.10 AU 표시 길이';
+    this.notes = document.createElement('div'); this.notes.className = 'orbit-notes';
+    this.scaleNote = document.createElement('div'); this.scaleNote.className = 'orbit-scale-note';
+    const orbitScale = document.createElement('strong'); orbitScale.textContent = '궤도 좌표 · 동일 AU 축척';
+    const modelScale = document.createElement('span'); modelScale.textContent = '천체 크기 확대 · 표면과 별 배치는 연출';
+    this.scaleNote.append(orbitScale, modelScale);
+    const keys = document.createElement('div'); keys.className = 'orbit-keys';
+    this.currentKey = document.createElement('span'); this.currentKey.className = 'orbit-key-current'; this.currentKey.textContent = '현재 궤도';
+    this.comparisonKey = document.createElement('span'); this.comparisonKey.className = 'orbit-key-saved'; this.comparisonKey.textContent = '보관 궤도';
+    this.tickNote = document.createElement('span'); this.tickNote.className = 'orbit-key-tick'; this.tickNote.textContent = `눈금 간격 · 주기의 1/${timeDivisions}`;
+    this.vectorNote = document.createElement('span'); this.vectorNote.className = 'orbit-vector-note'; this.vectorNote.textContent = '속도 · 10 km/s당 0.10 AU 표시 길이';
+    keys.append(this.currentKey, this.comparisonKey, this.tickNote, this.vectorNote); this.notes.append(this.scaleNote, keys);
     this.detailLegend = document.createElement('div'); this.detailLegend.className = 'orbit-detail-legend'; this.detailLegend.hidden = true;
     this.constructionLabels = new Map(); this.constructionLeaders = new Map();
     for (const [id,title] of [['center','C · 타원 중심'],['focus','F · 중력 초점'],['position','P · 실제 위치'],['eccentric','E · 보조원 점'],['mean','M · 시간 기준'],['radial','vᵣ'],['transverse','vθ'],['total','v'],['acceleration','가속도 방향']]) {
       const label = document.createElement('span'); label.className = 'orbit-construction-label'; label.textContent = title; label.hidden = true; this.overlay.append(label); this.constructionLabels.set(id, label);
       const line = document.createElementNS(this.svg.namespaceURI,'path'); line.classList.add('orbit-construction-leader'); line.style.display = 'none'; this.svg.append(line); this.constructionLeaders.set(id, line);
     }
-    this.overlay.append(this.scaleNote, this.vectorNote, this.detailLegend); this.container.append(this.overlay);
+    this.overlay.append(this.notes, this.detailLegend); this.container.append(this.overlay);
   }
   buildPointer() {
     this.raycaster = new THREE.Raycaster(); this.raycaster.params.Line.threshold = .025; this.raycaster.params.Line2 = { threshold: 2 };
@@ -325,12 +380,17 @@ export class OrbitScene {
   }
   layoutLabels() {
     if (!this.snapshot) return;
-    const width=this.width, height=this.height, narrow=width<620, labelWidth=narrow?142:166, labelHeight=30;
-    const bottom=height-(narrow?103:69), occupied=[];
+    const width=this.width, height=this.height, narrow=width<620, labelHeight=30;
+    this.notes.hidden = Boolean(this.inspection);
+    this.vectorNote.hidden = !this.view.velocity;
+    this.currentKey.hidden = !this.view.orbit;
+    this.tickNote.hidden = !this.view.orbit || !this.timeTicks.visible;
+    this.comparisonKey.hidden = !this.savedGroup.visible;
+    const bottom=height-Math.max(69, this.notes.offsetHeight + 21), occupied=[];
     const selected=this.view.selectedPart;
     const defaults=this.focusContext??['orbiter','central-body','apsides','orbit-path'];
     const candidates=[...new Set([selected,...defaults])].slice(0,narrow?3:4);
-    this.labelEvidence=[]; this.vectorNote.hidden=Boolean(this.inspection)||!this.view.velocity; this.scaleNote.hidden=Boolean(this.inspection);
+    this.labelEvidence=[];
     this.layoutConstructionLabels();
     for (const [id,label] of this.labels) {
       label.button.hidden=true; for(const object of [label.halo,label.line,label.dot])object.style.display='none';
@@ -341,8 +401,12 @@ export class OrbitScene {
       if(point.z < -1 || point.z > 1 || Math.abs(point.x)>1 || Math.abs(point.y)>1)continue;
       const anchorX=(point.x*.5+.5)*width,anchorY=(-point.y*.5+.5)*height;
       const title=id==='central-body' && this.landmarks.circular?'중심체 · 원의 중심':id==='apsides' && this.landmarks.circular?'기준 +X 위치':part.name;
+      const labelWidth = Math.max(54, 21 + Array.from(title).reduce((sum, char) => sum + (/^[\x20-\x7e]$/.test(char) ? 5.5 : narrow ? 10 : 11), 0));
       label.button.textContent=title; label.button.style.width=`${labelWidth}px`; label.button.classList.toggle('is-selected',id===selected);
-      const offsets=this.inspection ? [[12-anchorX,12-anchorY]] : [[15,-42],[-labelWidth-15,-42],[15,14],[-labelWidth-15,14],[-labelWidth/2,-74],[-labelWidth/2,48]];
+      const symbolRadius = id === 'central-body' ? G.centralSymbolRadiusWorld : id === 'orbiter' ? G.particleSymbolRadiusWorld : 0;
+      const eyeDistance = -part.anchor.clone().applyMatrix4(this.camera.matrixWorldInverse).z;
+      const symbolPadding = Math.max(15, symbolRadius * this.camera.projectionMatrix.elements[5] / eyeDistance * height / 2 + 9);
+      const offsets=this.inspection ? [[12-anchorX,12-anchorY]] : [[symbolPadding,-42],[-labelWidth-symbolPadding,-42],[symbolPadding,14],[-labelWidth-symbolPadding,14],[-labelWidth/2,-labelHeight-symbolPadding-20],[-labelWidth/2,symbolPadding+16]];
       let best=null;
       for(const [dx,dy]of offsets){const x=clamp(anchorX+dx,10,width-labelWidth-10),y=clamp(anchorY+dy,this.inspection?12:48,bottom-labelHeight);const rect={x,y,w:labelWidth,h:labelHeight};
         if(!occupied.some(other=>rect.x<other.x+other.w+6&&rect.x+rect.w+6>other.x&&rect.y<other.y+other.h+7&&rect.y+rect.h+7>other.y)){best=rect;break;}}
@@ -362,7 +426,8 @@ export class OrbitScene {
     if (!this.inspection) return;
     const rows = this.inspection.kind === 'motion' ? [['velocity','v 합'],['radial','vᵣ 방사'],['transverse','vθ 횡방향'],['acceleration','가속도 방향 · 길이 고정']] : [['mean','M 시간 기준각'],['eccentric','E 보조원 각'],['true','ν 초점 위치각']];
     if (this.detailLegend.dataset.kind !== this.inspection.kind) {
-      this.detailLegend.dataset.kind = this.inspection.kind; this.detailLegend.replaceChildren(...rows.map(([key, title]) => { const label = document.createElement('span'); label.textContent = title; label.style.setProperty('--key-color', color[key]); return label; }));
+      const scale = document.createElement('small'); scale.textContent = '천체 크기 확대 · 표면 연출';
+      this.detailLegend.dataset.kind = this.inspection.kind; this.detailLegend.replaceChildren(...rows.map(([key, title]) => { const label = document.createElement('span'); label.textContent = title; label.style.setProperty('--key-color', color[key]); return label; }), scale);
     }
     if (!this.view.labels) return;
     if(this.inspection.kind==='motion') {
@@ -445,7 +510,7 @@ export class OrbitScene {
   focusPart(id) {
     if(this.inspection)this.endInspection();
     if(!this.parts.has(id)||!this.snapshot)return false;
-    const related={ 'central-body':['central-body','second-focus','ellipse-center'],orbiter:['orbiter','velocity-vector'], 'orbit-path':['orbit-path','central-body'], 'ellipse-center':['ellipse-center','semimajor-axis','second-focus'], 'second-focus':['central-body','ellipse-center','second-focus'], 'semimajor-axis':['semimajor-axis','ellipse-center'], 'radius-line':['radius-line','central-body','orbiter'],apsides:['apsides','central-body'], 'velocity-vector':['orbiter','velocity-vector'], 'equal-areas':['equal-areas','central-body'] };
+    const related={ 'central-body':['central-body'],orbiter:['orbiter'], 'orbit-path':['orbit-path','central-body'], 'ellipse-center':['ellipse-center','semimajor-axis','second-focus'], 'second-focus':['central-body','ellipse-center','second-focus'], 'semimajor-axis':['semimajor-axis','ellipse-center'], 'radius-line':['radius-line','central-body','orbiter'],apsides:['apsides','central-body'], 'velocity-vector':['orbiter','velocity-vector'], 'equal-areas':['equal-areas','central-body'] };
     const ids=related[id];this.focusContext=[id,...ids];return this.fit(ids,id==='equal-areas'||id==='semimajor-axis'?[0,1,0]:[.45,1.25,1]);
   }
   getCameraState() {return{position:this.camera.position.toArray().map(clean),target:this.controls.target.toArray().map(clean),zoom:clean(this.camera.zoom)};}
@@ -496,7 +561,13 @@ export class OrbitScene {
     this.renderer.setSize(this.width,this.height,false);this.camera.aspect=this.width/this.height;this.camera.updateProjectionMatrix();
     for(const material of this.wideMaterials)material.resolution.set(this.width,this.height);this.render();
   }
-  render() {if(this.disposed)return;this.camera.updateMatrixWorld();this.layoutLabels();this.renderer.render(this.scene,this.camera);}
+  render() {
+    if (this.disposed) return;
+    this.camera.updateMatrixWorld();
+    this.sky.position.copy(this.camera.position);
+    this.shadeTrack(this.orbitPath); this.shadeTrack(this.savedPath);
+    this.layoutLabels(); this.renderer.render(this.scene, this.camera);
+  }
   dispose() {
     if(this.disposed)return;this.disposed=true;this.resizeObserver.disconnect();this.controls.removeEventListener('change',this.controlChange);this.controls.dispose();
     this.renderer.domElement.removeEventListener('pointerdown',this.pointerDown);this.renderer.domElement.removeEventListener('pointerup',this.pointerUp);this.renderer.domElement.removeEventListener('pointercancel',this.pointerCancel);

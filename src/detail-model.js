@@ -1,7 +1,8 @@
 import { getSnapshot, ORBIT_CONSTANTS_SI } from './model.js';
 
 const TAU = 2 * Math.PI;
-const { astronomicalUnitM: AU, dayS: DAY, solarMuM3PerS2: MU } = ORBIT_CONSTANTS_SI;
+const { astronomicalUnitM: AU, dayS: DAY, solarMuM3PerS2 } = ORBIT_CONSTANTS_SI;
+const centralMass = snapshot => snapshot.config.centralMassSolar ?? 1;
 const clean = value => value === 0 ? 0 : value;
 const finite = value => typeof value === 'number' && Number.isFinite(value);
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -33,14 +34,15 @@ export function orbitDetail(input) {
   const { x, y } = s.positionM, { x: vx, y: vy } = s.velocityMps;
   const r = s.radiusM, M = s.meanAnomalyRad, E = s.eccentricAnomalyRad;
   const n = s.meanMotionRadPerS;
+  const mu = solarMuM3PerS2 * centralMass(s);
   const h = x * vy - y * vx;
   // Algebraically (r dot v)/r. Factoring avoids catastrophic cancellation of
   // the two Cartesian products for near-circular orbits. No epsilon clamping.
   const radialMps = e === 0 || M === 0 || M === Math.PI ? 0 : n * a * a * e * Math.sin(E) / r;
   const transverseMps = h / r;
-  const magnitudeMps2 = MU / (r * r);
+  const magnitudeMps2 = mu / (r * r);
   const kineticJPerKg = (vx * vx + vy * vy) / 2;
-  const potentialJPerKg = -MU / r;
+  const potentialJPerKg = -mu / r;
   const totalJPerKg = kineticJPerKg + potentialJPerKg;
   const energyResidual = totalJPerKg - s.specificEnergyJPerKg;
   const momentumResidual = h - s.specificAngularMomentumM2PerS;
@@ -51,7 +53,7 @@ export function orbitDetail(input) {
       radialVectorMps: vector(radialMps, x / r, y / r),
       transverseVectorMps: vector(transverseMps, -y / r, x / r),
       speedMps: s.speedMps, flightPathAngleRad: clean(Math.atan2(radialMps, transverseMps)),
-      circularMps: Math.sqrt(MU / r), escapeMps: Math.sqrt(2 * MU / r),
+      circularMps: Math.sqrt(mu / r), escapeMps: Math.sqrt(2 * mu / r),
     },
     acceleration: {
       vectorMps2: vector(-magnitudeMps2, x / r, y / r),
@@ -95,10 +97,11 @@ export function describeOrbitDetail(partId, snapshot, detail = orbitDetail(snaps
   const s = snapshot, d = detail, v = d.velocity, g = d.geometry;
   switch (partId) {
     case 'central-body': return {
-      facts: [fact('중력계수 μ', MU, 'm³/s²'), fact('현재 중심 거리', s.radiusM / AU, 'AU'),
+      facts: [fact('중심체 질량', centralMass(s), 'M☉', 2),
+        fact('중력계수 μ', solarMuM3PerS2 * centralMass(s), 'm³/s²'), fact('현재 중심 거리', s.radiusM / AU, 'AU'),
         fact('중력 가속도 크기', d.acceleration.magnitudeMps2 * 1000, 'mm/s²'),
         fact('현재 거리의 원궤도 속력', v.circularMps / 1000, 'km/s'), fact('현재 거리의 탈출 속력', v.escapeMps / 1000, 'km/s')],
-      note: '원점의 고정 중력원입니다. 표식 구의 반지름은 실제 태양 표면·충돌 경계가 아닙니다. 원궤도·탈출 속력은 현재 거리의 비교값이며 기동이나 탈출 경로를 계산하지 않습니다.',
+      note: '원점의 고정 중력원입니다. 질량은 태양 질량(M☉)을 단위로 표시합니다. 3D 구의 크기는 대표 표식입니다. 원궤도·탈출 속력은 현재 거리의 비교값이며 기동이나 탈출 경로를 계산하지 않습니다.',
     };
     case 'orbiter': return {
       facts: [fact('전체 속력', v.speedMps / 1000, 'km/s'), fact('방사 속도', v.radialMps / 1000, 'km/s'),

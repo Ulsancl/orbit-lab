@@ -1,0 +1,68 @@
+.charts .kinematics-radius,
+.charts .chart-readouts {
+  margin-inline: 22px;
+}
+
+.charts .kinematics-radius {
+  border-top: 1px solid var(--line);
+  margin-top: 3px;
+}
+
+.charts .kinematics-radius .chart {
+  height: 190px;
+  margin-inline: 0;
+}
+
+.chart-apsis-key {
+  color: var(--muted);
+  font-size: 11px;
+  margin-block: 9px 12px;
+}
+
+.chart-readouts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
+  gap: 8px;
+  margin-block: 12px;
+}
+
+.chart-readout {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #0c172b;
+  padding: 9px 12px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.chart-readout dt {
+  font-weight: 600;
+}
+
+.chart-readout dd {
+  margin: 4px 0 0;
+  color: #e4edfa;
+  font-variant-numeric: tabular-nums;
+}
+
+.chart-readout .chart-readout-phase {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.chart-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 740px) {
+  .charts .kinematics-radius,
+  .charts .chart-readouts {
+    margin-inline: 15px;
+  }
+}

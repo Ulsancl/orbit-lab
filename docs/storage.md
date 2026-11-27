@@ -1,6 +1,6 @@
 # 실험 파일과 원문 보호
 
-`.orbit.json`은 `type: orbit-lab-project`, `schemaVersion: 1`, `modelVersion: orbit-kepler-1`인 JSON입니다. 실험은 `config:{semiMajorAxisM,eccentricity}`와 `meanAnomalyRad`를 담습니다. 비교 기록은 별도 이름과 같은 구조의 실험을 보관합니다.
+`.orbit.json`은 `type: orbit-lab-project`, `schemaVersion: 1`, `modelVersion: orbit-kepler-1`인 JSON입니다. 실험은 `config:{semiMajorAxisM,eccentricity}`와 `meanAnomalyRad`를 담습니다. `config`에는 중심체 질량을 태양질량 단위로 기록하는 선택 필드 `centralMassSolar`를 추가할 수 있습니다. 이 필드가 없는 기존 기록에는 1을 적용합니다. 비교 기록은 별도 이름과 같은 구조의 실험을 보관합니다.
 
 관찰 정보에는 표시 플래그·선택 대상, 카메라, `daysPerSecond` 5·15·30을 보관합니다. 카메라는 1 단위가 1 AU인 화면 공간 좌표이며 물리 계산의 미터 좌표와 다릅니다. 표시용 좌표의 절댓값은 30 이하, 카메라 거리는 0.2~40, 확대는 0.25~4입니다. 카메라가 null이면 저장된 수동 시점이 없다는 뜻입니다.
 

@@ -24,7 +24,8 @@ export function lessonReady(guide, experiment, view, running = false) {
   if (!guide || guide.status !== 'active' || running) return false;
   const rule = LESSONS[guide.id]?.steps[guide.stage]; if (!rule) return false;
   const near = (a, b) => Math.abs(a - b) < 1e-8;
-  return near(experiment.config.semiMajorAxisM / AU, rule.a) && near(experiment.config.eccentricity, rule.e)
+  return (experiment.config.centralMassSolar ?? 1) === 1
+    && near(experiment.config.semiMajorAxisM / AU, rule.a) && near(experiment.config.eccentricity, rule.e)
     && near(experiment.meanAnomalyRad / (2 * Math.PI), rule.progress)
     && (rule.equalAreas === null || view?.equalAreas === rule.equalAreas);
 }
