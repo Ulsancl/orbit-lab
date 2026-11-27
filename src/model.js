@@ -9,21 +9,23 @@ export const ORBIT_CONSTANTS_SI = Object.freeze({
 const { astronomicalUnitM: AU, dayS: DAY, solarMuM3PerS2: MU } = ORBIT_CONSTANTS_SI;
 
 export const DEFAULT_CONFIG = Object.freeze({ semiMajorAxisM: AU, eccentricity: 0.35 });
+const REQUIRED_CONFIG_KEYS = Object.keys(DEFAULT_CONFIG);
 export const CONFIG_LIMITS_SI = Object.freeze({
   semiMajorAxisM: Object.freeze({ min: 0.5 * AU, max: 2 * AU }),
   eccentricity: Object.freeze({ min: 0, max: 0.8 }),
+  centralMassSolar: Object.freeze({ min: 0.25, max: 4 }),
 });
 export const DEFAULT_MEAN_ANOMALY_RAD = 0;
 export const MAX_ADVANCE_TIME_S = 36525 * DAY;
 
-function record(value, keys, name, optional = false) {
+function record(value, required, name, optional = []) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)
       || ![Object.prototype, null].includes(Object.getPrototypeOf(value))) {
     throw new TypeError(`${name} must be a plain object`);
   }
   const actual = Reflect.ownKeys(value);
-  if (actual.some((key) => !keys.includes(key))
-      || (!optional && (actual.length !== keys.length || keys.some((key) => !Object.hasOwn(value, key))))) {
+  if (actual.some((key) => !required.includes(key) && !optional.includes(key))
+      || required.some((key) => !Object.hasOwn(value, key))) {
     throw new TypeError(`${name} has unexpected or missing fields`);
   }
 }
@@ -43,7 +45,9 @@ function phase(value) {
 }
 
 function cloneConfig(config) {
-  return { semiMajorAxisM: config.semiMajorAxisM, eccentricity: config.eccentricity };
+  const copy = { semiMajorAxisM: config.semiMajorAxisM, eccentricity: config.eccentricity };
+  if (Object.hasOwn(config, 'centralMassSolar')) copy.centralMassSolar = config.centralMassSolar;
+  return copy;
 }
 
 export function normalizeConfig(value) {
@@ -51,15 +55,19 @@ export function normalizeConfig(value) {
   const result = {};
   for (const [key, { min, max }] of Object.entries(CONFIG_LIMITS_SI)) {
     const supplied = input[key];
-    const number = typeof supplied === 'number' && Number.isFinite(supplied) ? supplied : DEFAULT_CONFIG[key];
-    result[key] = Math.max(min, Math.min(max, number)) || 0;
+    const number = typeof supplied === 'number' && Number.isFinite(supplied) ? supplied : (DEFAULT_CONFIG[key] ?? 1);
+    const boundedNumber = Math.max(min, Math.min(max, number)) || 0;
+    // Omitting one solar mass keeps default experiments portable to legacy readers.
+    if (key !== 'centralMassSolar' || boundedNumber !== 1) result[key] = boundedNumber;
   }
   return result;
 }
 
 export function assertConfig(value) {
-  record(value, ['semiMajorAxisM', 'eccentricity'], 'config');
-  for (const [key, { min, max }] of Object.entries(CONFIG_LIMITS_SI)) bounded(value[key], min, max, key);
+  record(value, REQUIRED_CONFIG_KEYS, 'config', ['centralMassSolar']);
+  for (const [key, { min, max }] of Object.entries(CONFIG_LIMITS_SI)) {
+    if (Object.hasOwn(value, key)) bounded(value[key], min, max, key);
+  }
   return value;
 }
 
@@ -129,10 +137,11 @@ export function solveEccentricAnomaly(meanAnomalyRad, eccentricity) {
 function orbit(config) {
   const a = config.semiMajorAxisM;
   const e = config.eccentricity;
+  const mu = MU * (Object.hasOwn(config, 'centralMassSolar') ? config.centralMassSolar : 1);
   const b = a * Math.sqrt(1 - e * e);
-  const n = Math.sqrt(MU / (a * a * a));
-  const h = Math.sqrt(MU * a * (1 - e * e));
-  return { a, e, b, n, T: TAU / n, h, area: Math.PI * a * b };
+  const n = Math.sqrt(mu / (a * a * a));
+  const h = Math.sqrt(mu * a * (1 - e * e));
+  return { a, e, mu, b, n, T: TAU / n, h, area: Math.PI * a * b };
 }
 
 function sinCos(E) {
@@ -172,9 +181,9 @@ export function getSnapshot(experiment) {
     timeSinceReferenceS: M / o.n,
     periapsisM: o.a * (1 - o.e),
     apoapsisM: o.a * (1 + o.e),
-    periapsisSpeedMps: Math.sqrt(MU / o.a * (1 + o.e) / (1 - o.e)),
-    apoapsisSpeedMps: Math.sqrt(MU / o.a * (1 - o.e) / (1 + o.e)),
-    specificEnergyJPerKg: -MU / (2 * o.a),
+    periapsisSpeedMps: Math.sqrt(o.mu / o.a * (1 + o.e) / (1 - o.e)),
+    apoapsisSpeedMps: Math.sqrt(o.mu / o.a * (1 - o.e) / (1 + o.e)),
+    specificEnergyJPerKg: -o.mu / (2 * o.a),
     specificAngularMomentumM2PerS: o.h,
     arealVelocityM2PerS: o.h / 2,
     orbitAreaM2: o.area,
@@ -194,7 +203,7 @@ export function advanceExperiment(experiment, deltaTimeS) {
 }
 
 function count(options) {
-  record(options, ['sampleCount'], 'sample options', true);
+  record(options, [], 'sample options', ['sampleCount']);
   const n = Object.hasOwn(options, 'sampleCount') ? options.sampleCount : 256;
   bounded(n, 16, 2048, 'sampleCount');
   if (!Number.isInteger(n)) throw new TypeError('sampleCount must be an integer');

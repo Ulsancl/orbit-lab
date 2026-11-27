@@ -52,6 +52,8 @@ function savedCamera(value) {
   return copy(value);
 }
 function savedExperiment(value) {
+  // Legacy v1 files omit centralMassSolar. The strict assertion validates it
+  // when present, and legacy readers reject the unfamiliar field.
   try { assertExperiment(value); }
   catch (error) {
     if (!(error instanceof TypeError) && !(error instanceof RangeError)) throw error;

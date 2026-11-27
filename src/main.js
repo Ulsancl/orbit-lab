@@ -1,5 +1,6 @@
 import './style.css';
-import { DEFAULT_CONFIG, ORBIT_CONSTANTS_SI, normalizeConfig, createExperiment, getSnapshot, advanceExperiment, wrapMeanAnomalyRad } from './model.js';
+import './condition-controls.css';
+import { CONFIG_LIMITS_SI, DEFAULT_CONFIG, ORBIT_CONSTANTS_SI, normalizeConfig, createExperiment, getSnapshot, advanceExperiment, wrapMeanAnomalyRad } from './model.js';
 import { createProject, parseProject, serializeProject, normalizeView, DEFAULT_VIEW } from './project.js';
 import { createBrowserAutosave, supportsAutosaveLock, withAutosaveLock, writeIfUnchanged, readTabDraft, writeTabDraft, clearTabDraft } from './browser-autosave.js';
 import { COMPONENTS } from './geometry.js';
@@ -14,7 +15,17 @@ const $ = selector => document.querySelector(selector), $$ = selector => [...doc
 const text = (selector, value) => { const element = $(selector); if (element.textContent !== value) element.textContent = value; };
 const copy = value => structuredClone(value), fmt = (value, digits = 1) => (Math.abs(value) < .5 * 10 ** -digits ? 0 : value).toLocaleString('ko-KR', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 const { astronomicalUnitM: AU, dayS: DAY } = ORBIT_CONSTANTS_SI, TAU = 2 * Math.PI;
-const conditionName = exp => `a ${fmt(exp.config.semiMajorAxisM / AU, 2)} AU · e ${fmt(exp.config.eccentricity, 2)} · ${fmt(exp.meanAnomalyRad / TAU * 100, 1)}%`;
+const phasePercent = experiment => experiment.meanAnomalyRad / TAU * 100;
+const centralMass = config => config.centralMassSolar ?? 1;
+const conditionPrecision = new Intl.NumberFormat('ko-KR', { maximumFractionDigits: 6 });
+const conditionName = exp => `a ${fmt(exp.config.semiMajorAxisM / AU, 2)} AU · e ${fmt(exp.config.eccentricity, 2)} · ${conditionPrecision.format(centralMass(exp.config))} M☉ · ${conditionPrecision.format(phasePercent(exp))}%`;
+const conditions = [
+  { id: 'a', key: 'semiMajorAxisM', multiplier: AU, unit: 'AU', keyboardStep: .01 },
+  { id: 'eccentricity', key: 'eccentricity', multiplier: 1, unit: '', keyboardStep: .01 },
+  { id: 'central-mass', key: 'centralMassSolar', multiplier: 1, unit: '태양질량', keyboardStep: .05 },
+];
+const conditionValue = (config, key) => key === 'centralMassSolar' ? centralMass(config) : config[key];
+const progressRange = $('#progress'), progressNumber = $('#progress-number');
 const STORAGE_KEY = 'orbit-lab-project-v1', desktop = window.orbitDesktop;
 let experiment = createExperiment(), view = normalizeView(DEFAULT_VIEW), comparison = null, snapshot, daysPerSecond = 15;
 let scene = null, initialCamera = null, guide = null, previous = null, busy = false, restoring = false, chartDisplay = 'both';
@@ -223,7 +234,7 @@ function setProgress(percent) {
 function changeConfig(patch) {
   if (busy) return;
   const config = normalizeConfig({ ...experiment.config, ...patch });
-  if (Object.keys(config).every(key => config[key] === experiment.config[key])) { syncControls(); return; }
+  if (conditions.every(({ key }) => conditionValue(config, key) === conditionValue(experiment.config, key))) { syncControls(); return; }
   pause(); scene?.endInspection?.(); experiment.config = config; updateSnapshot(); syncControls(); refresh(); scheduleSave();
 }
 function remember() { syncTime(); previous = { project: capture(), guide: copy(guide) }; $('#undo-new').hidden = false; }
@@ -245,14 +256,14 @@ function setBusy(value) {
 }
 const conditionDisplays = new WeakMap();
 function syncControls() {
-  for (const [id, key, multiplier] of [['a', 'semiMajorAxisM', AU], ['eccentricity', 'eccentricity', 1]]) {
-    const value = String(experiment.config[key] / multiplier);
+  for (const { id, key, multiplier, unit } of conditions) {
+    const applied = conditionValue(experiment.config, key), value = String(applied / multiplier);
     for (const selector of [`#${id}`, `#${id}-number`]) {
       const input = $(selector); input.step = 'any'; input.value = value;
-      input.setAttribute('aria-valuetext', `${value}${multiplier === AU ? ' AU' : ''}`);
+      input.setAttribute('aria-valuetext', unit ? `${value} ${unit}` : value);
       // Native range inputs may canonicalize their last decimal even with
       // step=any. Remember that display without replacing the applied SI value.
-      conditionDisplays.set(input, { value: Number(input.value), applied: experiment.config[key] });
+      conditionDisplays.set(input, { value: Number(input.value), applied });
     }
   }
   $('#rate').value = daysPerSecond; $('#part-select').value = view.selectedPart;
@@ -264,16 +275,27 @@ function renderGuide() {
   $('#lesson-guide').hidden = !guide; if (!guide) return;
   const info = guideText(guide), ready = lessonReady(guide, experiment, view, running);
   text('#guide-title', LESSONS[guide.id].title); text('#guide-progress', guide.status === 'completed' ? '관찰 완료' : `관찰 ${guide.stage + 1} / ${info.total}`);
-  text('#guide-action', info.action); text('#guide-result', info.result); $('#guide-next').hidden = guide.status !== 'active'; $('#guide-next').disabled = !ready;
+  const massHint = guide.status === 'active' && centralMass(experiment.config) !== 1 ? ' 중심체 질량을 1 M☉로 맞추세요.' : '';
+  text('#guide-action', info.action + massHint); text('#guide-result', info.result); $('#guide-next').hidden = guide.status !== 'active'; $('#guide-next').disabled = !ready;
   text('#guide-next', ready ? '관찰 확인 · 다음으로' : '조건을 맞춘 뒤 관찰 확인');
   $('#guide-evidence').replaceChildren(...guide.evidence.map((evidence, index) => Object.assign(document.createElement('li'), { textContent: `${index + 1}차 · ${fmt(evidence.periodDays, 2)}일 · ${fmt(evidence.radiusAU, 2)} AU · ${fmt(evidence.speedKmS, 2)} km/s${evidence.areas ? ` · 각 ${fmt(evidence.areas[0].areaAU2, 5)} AU²` : ''}` })));
 }
+let displayedProgress;
+function syncProgressNumber(progress = phasePercent(experiment)) {
+  const rounded = Number(progress.toPrecision(12));
+  displayedProgress = rounded === 100 ? progress : rounded;
+  const value = String(displayedProgress);
+  if (progressNumber.value !== value) progressNumber.value = value;
+}
 function refresh(paint = true) {
-  const periodText = `${fmt(snapshot.periodS / DAY, 2)}일`, progress = experiment.meanAnomalyRad / TAU * 100;
+  const periodText = `${fmt(snapshot.periodS / DAY, 2)}일`, progress = phasePercent(experiment);
   text('#period', periodText); text('#radius', `${fmt(snapshot.radiusM / AU, 3)} AU`); text('#speed', `${fmt(snapshot.speedMps / 1000, 2)} km/s`); text('#cycle', `${fmt(progress, 1)}%`);
   text('#condition-period', periodText); text('#condition-shape', `a ${fmt(experiment.config.semiMajorAxisM / AU, 2)} AU · ${experiment.config.eccentricity === 0 ? '원 궤도' : `타원 e ${fmt(experiment.config.eccentricity, 2)}`}`);
   text('#play', running ? '일시정지' : '재생'); text('#play-state', running ? `1초에 ${daysPerSecond}일 진행` : '정지');
-  text('#progress-reading', `${fmt(progress, 1)}%`); $('#progress').value = progress; text('#cycle-days', `이번 한 바퀴 ${fmt(snapshot.timeSinceReferenceS / DAY, 2)} / ${fmt(snapshot.periodS / DAY, 2)}일`);
+  progressRange.value = progress;
+  progressRange.setAttribute('aria-valuetext', `${conditionPrecision.format(progress)}%`);
+  if (!running || document.activeElement !== progressNumber) syncProgressNumber(progress);
+  text('#cycle-days', `이번 한 바퀴 ${fmt(snapshot.timeSinceReferenceS / DAY, 2)} / ${fmt(snapshot.periodS / DAY, 2)}일`);
   const circle = experiment.config.eccentricity === 0;
   text('#periapsis-button', circle ? '기준 위치' : '가장 가까운 곳'); text('#apoapsis-button', circle ? '반대 위치' : '가장 먼 곳');
   text('[data-camera="periapsis"]', circle ? '기준 위치 확대' : '가까운 곳 확대');
@@ -357,14 +379,15 @@ if (!desktop) {
   if (!storageBlocked && !browserAutosave.canSave()) reportAutosave('unavailable');
   else if (resumedTabDraft) saveLocal();
 }
-for (const [id, key, multiplier] of [['a', 'semiMajorAxisM', AU], ['eccentricity', 'eccentricity', 1]]) {
+for (const { id, key, multiplier, keyboardStep } of conditions) {
   const applyValue = event => {
     const input = event.target, value = Number(input.value), displayed = conditionDisplays.get(input);
+    const current = conditionValue(experiment.config, key);
     // An unchanged AU display must not round-trip the saved SI value, pause
     // playback or end inspection. Division followed by multiplication can
     // differ by an ULP even when the user has not edited the input.
-    if (busy || !input.value.trim() || !Number.isFinite(value) || value === experiment.config[key] / multiplier
-      || (displayed?.applied === experiment.config[key] && value === displayed.value)) { syncControls(); return; }
+    if (busy || !input.value.trim() || !Number.isFinite(value) || value === current / multiplier
+      || (displayed?.applied === current && value === displayed.value)) { syncControls(); return; }
     changeConfig({ [key]: value * multiplier });
   };
   for (const selector of [`#${id}`, `#${id}-number`]) {
@@ -372,22 +395,51 @@ for (const [id, key, multiplier] of [['a', 'semiMajorAxisM', AU], ['eccentricity
     for (const event of range ? ['input'] : ['change', 'blur']) input.addEventListener(event, applyValue);
     input.addEventListener('keydown', event => {
       if (event.altKey || event.ctrlKey || event.metaKey) return;
+      if (!range && event.key === 'Enter') { event.preventDefault(); applyValue(event); return; }
       const directions = range ? { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1, PageDown: -10, PageUp: 10 }
         : { ArrowDown: -1, ArrowUp: 1, PageDown: -10, PageUp: 10 };
       if (!(event.key in directions) && !(range && ['Home', 'End'].includes(event.key))) return;
       event.preventDefault(); if (busy) { syncControls(); return; }
-      const value = Number(input.value), current = experiment.config[key], displayed = conditionDisplays.get(input);
+      const value = Number(input.value), current = conditionValue(experiment.config, key), displayed = conditionDisplays.get(input);
       const unchanged = value === current / multiplier || (displayed?.applied === current && value === displayed.value);
       const base = input.value.trim() && Number.isFinite(value) && !unchanged ? value * multiplier : current;
-      const min = Number(input.min) * multiplier, max = Number(input.max) * multiplier;
+      const { min, max } = CONFIG_LIMITS_SI[key];
       const next = event.key === 'Home' ? min : event.key === 'End' ? max
-        : Math.max(min, Math.min(max, base + directions[event.key] * .01 * (event.shiftKey ? .1 : 1) * multiplier));
+        : Math.max(min, Math.min(max, base + directions[event.key] * keyboardStep * (event.shiftKey ? .1 : 1) * multiplier));
       changeConfig({ [key]: next });
     });
   }
 }
 $('#play').addEventListener('click', togglePlay); $('#reset-phase').addEventListener('click', () => setProgress(0));
-$('#progress').addEventListener('input', event => setProgress(Number(event.target.value)));
+progressRange.addEventListener('input', () => setProgress(progressRange.valueAsNumber));
+function applyProgressNumber() {
+  const value = progressNumber.valueAsNumber;
+  if (Number.isFinite(value) && value !== displayedProgress) {
+    setProgress(value);
+  }
+  syncProgressNumber();
+}
+progressNumber.addEventListener('change', applyProgressNumber);
+progressNumber.addEventListener('blur', applyProgressNumber);
+for (const input of [progressRange, progressNumber]) {
+  input.addEventListener('keydown', event => {
+    if (event.altKey || event.ctrlKey || event.metaKey) return;
+    if (input === progressNumber && event.key === 'Enter') {
+      event.preventDefault();
+      applyProgressNumber();
+      return;
+    }
+    const directions = input === progressRange
+      ? { ArrowLeft: -1, ArrowDown: -1, ArrowRight: 1, ArrowUp: 1, PageDown: -10, PageUp: 10 }
+      : { ArrowDown: -1, ArrowUp: 1, PageDown: -10, PageUp: 10 };
+    if (!Object.hasOwn(directions, event.key)) return;
+    event.preventDefault();
+    const current = phasePercent(experiment);
+    const pending = progressNumber.valueAsNumber;
+    const base = input === progressNumber && Number.isFinite(pending) && pending !== displayedProgress ? pending : current;
+    setProgress(base + directions[event.key] * (event.shiftKey ? .01 : .1));
+  });
+}
 for (const button of $$('[data-progress]')) button.addEventListener('click', () => setProgress(Number(button.dataset.progress)));
 $('#periapsis-button').addEventListener('click', () => setProgress(0)); $('#apoapsis-button').addEventListener('click', () => setProgress(50));
 $('#rate').addEventListener('change', event => { const value = Number(event.target.value); if (busy || ![5, 15, 30].includes(value)) { syncControls(); return; } syncTime(); daysPerSecond = value; if (running) resetAnchor(); refresh(); scheduleSave(); });
