@@ -16,7 +16,7 @@ export default defineConfig(({ command }) => ({
     name: 'orbit-generated-files',
     config(config) {
       // Match the workspace's own output paths without hiding dependency dist directories.
-      const root = normalizePath(path.resolve(config.root ?? '.')).replace(/[*?[\]{}()!]/g, '\\$&');
+      const root = normalizePath(path.resolve(config.root ?? '.')).replace(/[\\*?[\]{}()!+@]/g, '\\$&');
       const artifacts = root + '/' + generated;
       return { server: { fs: { deny: ['.env', '.env.*', '*.{crt,pem}', '**/.git/**', artifacts, artifacts + '/**'] } } };
     },

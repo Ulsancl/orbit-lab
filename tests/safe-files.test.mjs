@@ -63,7 +63,9 @@ test('web build checks public inputs and the destination before publishing an is
 test('loopback development server serves source files but denies generated diagnostics', async t => {
   // Exercise a regular checkout path. Windows runners put TEMP on a
   // separate drive under an abbreviated user directory.
-  const root = stagingDirectory(path.resolve(import.meta.dirname, '..'));
+  const stage = stagingDirectory(path.resolve(import.meta.dirname, '..'));
+  const root = path.join(stage, 'orbit [fixture]');
+  fs.mkdirSync(root);
   const server = await createServer({
     configFile: path.resolve(import.meta.dirname, '../vite.config.js'),
     root,
@@ -72,7 +74,7 @@ test('loopback development server serves source files but denies generated diagn
   });
   t.after(async () => {
     await server.close();
-    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(stage, { recursive: true, force: true });
   });
   const artifacts = ['output/desktop/report.json', 'release/windows/fixture.txt', 'dist/fixture.txt', '.security-stage-test/fixture.txt'];
   for (const name of ['source.txt', ...artifacts]) {
@@ -88,6 +90,6 @@ test('loopback development server serves source files but denies generated diagn
   for (const name of artifacts) {
     const absolute = path.join(root, name).split(path.sep).join('/');
     assert.equal((await fetch(url + '/' + name)).status, 403);
-    assert.equal((await fetch(url + '/@fs/' + absolute)).status, 403);
+    assert.equal((await fetch(url + '/@fs/' + encodeURI(absolute))).status, 403);
   }
 });
