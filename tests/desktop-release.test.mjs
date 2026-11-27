@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import readline from 'node:readline';
+import { promisify } from 'node:util';
 import { FuseV1Options, getCurrentFuseWire } from '@electron/fuses';
 import { chromium } from 'playwright';
 import { artifactDirectory } from '../scripts/safe-files.mjs';
@@ -73,7 +74,13 @@ try {
   assert.equal(await page.locator('#help-dialog').evaluate(dialog => dialog.open), true);
   await page.locator('#close-help').click();
   assert.deepEqual(errors, []);
-  await page.close({ runBeforeUnload: true });
+  // Closing the Chromium target is distinct from closing the native window.
+  // Send the normal Windows close request so the app records window.json.
+  const systemRoot = process.env.SystemRoot;
+  assert.ok(systemRoot && path.isAbsolute(systemRoot) && Number.isInteger(app.pid));
+  const powershell = path.join(systemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe');
+  await promisify(execFile)(powershell, ['-NoProfile', '-NonInteractive', '-Command',
+    `if (-not (Get-Process -Id ${app.pid} -ErrorAction Stop).CloseMainWindow()) { exit 1 }`], { timeout: 10_000, windowsHide: true });
   const normalExit = await Promise.race([
     exited,
     new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Release window did not exit after closing')), 10_000); }),
