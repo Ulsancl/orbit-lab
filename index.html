@@ -2,7 +2,16 @@
 <html lang="ko">
 <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="theme-color" content="#090f20"><title>Orbit Lab · 궤도 실험실</title><link rel="icon" href="./favicon.svg"></head>
 <body>
-  <header class="app-header"><a class="brand" href="#main"><span class="brand-mark" aria-hidden="true">◉</span><span>ORBIT LAB<small>나만의 궤도 실험실</small></span></a><nav aria-label="실험 파일"><button id="new-project">새 실험</button><button id="undo-new" hidden>되돌리기</button><button id="open-project">열기</button><button id="save-project">파일 저장</button><button id="help" class="quiet">도움말</button></nav></header>
+  <header class="app-header">
+    <a class="brand" href="#main"><span class="brand-mark" aria-hidden="true">◉</span><span>ORBIT LAB<small>나만의 궤도 실험실</small></span></a>
+    <nav aria-label="실험 파일">
+      <button id="new-project" type="button">새 실험</button>
+      <button id="undo-new" type="button" hidden>되돌리기</button>
+      <button id="open-project" type="button">열기</button>
+      <button id="save-project" type="button" aria-label="파일 저장"><span class="file-action-prefix">파일 </span>저장</button>
+      <button id="help" type="button" class="quiet">도움말</button>
+    </nav>
+  </header>
   <main id="main">
     <div class="intro"><div><p class="eyebrow">움직임으로 이해하는 케플러의 법칙</p><h1>궤도를 움직이는 중력</h1><p>궤도의 크기, 모양, 중심체 질량을 바꾸고 공전 주기와 속력을 비교하세요.</p></div><div class="model-badge">고정된 중심체 · 이상적인 타원 궤도<span>실제 천체의 현재 위치를 예측하지 않습니다</span></div></div>
     <section class="metrics" aria-label="현재 궤도 결과"><div><span>한 바퀴 · 공전 주기</span><strong id="period">—</strong></div><div><span>중심체까지 거리</span><strong id="radius">—</strong></div><div><span>현재 속력</span><strong id="speed">—</strong></div><div><span>이번 한 바퀴의 진행</span><strong id="cycle">—</strong></div></section>
@@ -15,7 +24,11 @@
         <div id="inspection-strip" class="inspection-strip" hidden><span id="inspection-note"></span><button id="end-inspection">원래 관찰로 돌아가기</button></div>
         <div id="scene" aria-label="드래그로 회전하고 휠로 확대하는 3D 궤도"><p id="scene-error" hidden role="alert"></p></div>
         <div class="scene-footer"><span>드래그 회전 · 휠 확대 · 우클릭 이동</span><div class="button-group" aria-label="관찰 시점"><button data-camera="iso">전체 보기</button><button data-camera="plane">위에서</button><button data-camera="periapsis">가까운 곳 확대</button></div></div>
-        <p class="scale-note">거리는 공통 AU 축척을 씁니다. 중심체와 입자의 구체는 위치를 표시하는 기호입니다.<br>속도 화살표의 길이 0.1 AU는 10 km/s에 해당합니다.</p>
+        <details class="scene-disclosure" data-mobile-disclosure open>
+          <summary class="mobile-summary">3D 표시와 축척 읽기</summary>
+          <p class="scale-note">거리는 공통 AU 축척을 씁니다. 중심체와 입자의 구체는 위치를 표시하는 기호입니다.<br>속도 화살표의 길이 0.1 AU는 10 km/s에 해당합니다.</p>
+          <p class="scale-note mobile-scene-note">궤도선의 눈금은 공전 주기를 16등분합니다. 천체의 표면과 별 배치는 연출입니다.</p>
+        </details>
         <div class="timeline">
           <div class="timeline-phase">
             <label for="progress" class="range-label">이번 한 바퀴의 시간 진행</label>
@@ -35,7 +48,11 @@
         <div class="button-group apsis-buttons"><button id="periapsis-button">가장 가까운 곳</button><button id="apoapsis-button">가장 먼 곳</button></div><p id="apsis-reading" class="hint">—</p>
         <fieldset class="layers"><legend>보이는 요소</legend><label><input type="checkbox" data-view="orbit" checked> 궤도 경로</label><label><input type="checkbox" data-view="geometry" checked> 중심 · 초점 · 거리</label><label><input type="checkbox" data-view="velocity" checked> 속도 화살표</label><label><input type="checkbox" data-view="equalAreas"> 같은 시간, 같은 면적</label><label><input type="checkbox" data-view="labels" checked> 이름표</label></fieldset>
         <div class="area-readout" id="area-readout" hidden><strong>각 구간은 한 바퀴의 1/12</strong><span id="area-duration">—</span><span id="area-value">—</span><small>같은 궤도의 두 고정 구간 · 곡선을 따라 쓸고 간 면적</small></div>
-        <label for="part-select" class="part-label">요소 자세히 보기</label><div class="part-controls"><select id="part-select"></select><button id="focus-part">가까이</button></div><p id="part-description" class="part-description">—</p><button id="inspect-part" aria-pressed="false">구성 자세히</button><dl id="part-facts" class="part-facts"></dl><p id="part-detail-note"></p>
+        <label for="part-select" class="part-label">요소 자세히 보기</label><div class="part-controls"><select id="part-select"></select><button id="focus-part">가까이</button></div><p id="part-description" class="part-description">—</p><button id="inspect-part" aria-pressed="false">구성 자세히</button>
+        <details class="part-disclosure" data-mobile-disclosure open>
+          <summary class="mobile-summary">선택 요소의 수치와 단위</summary>
+          <dl id="part-facts" class="part-facts"></dl><p id="part-detail-note"></p>
+        </details>
       </aside>
       <section class="charts panel" aria-label="궤도 비교 그래프"><div class="panel-heading"><div><p class="eyebrow">READ THE MOTION</p><h2>한 바퀴 동안 속력은?</h2></div><button id="pin-comparison">현재 궤도 비교 보관</button></div><div class="chart-legend"><span class="current-key">현재 궤도 · 원 표시</span><span class="saved-key">보관 궤도 · 점선 / 마름모</span></div><div id="speed-chart" class="chart" role="img" aria-label="시간 진행률에 따른 속력, 세로 축 0에서 150 km/s"></div><p class="hint">가로축은 각 궤도의 시간 진행률 t/T입니다. 서로 다른 주기의 같은 %는 같은 일수가 아닙니다.</p><h3>한 바퀴 걸리는 시간</h3><div id="period-chart" class="period-chart" role="img" aria-label="공전 주기 비교, 공통 축 0에서 1100일"></div><div id="comparison-panel" hidden><p id="comparison-summary"></p><div class="button-group"><button data-chart-mode="both" aria-pressed="true">함께</button><button data-chart-mode="current" aria-pressed="false">현재만</button><button data-chart-mode="saved" aria-pressed="false">보관만</button><button id="clear-comparison">보관 해제</button></div><p class="hint">보관한 궤도와 입자 위치는 고정됩니다. 이 버튼들은 그래프 표시만 바꿉니다.</p></div></section>
       <section id="orbit-details" class="panel" aria-labelledby="orbit-detail-title"></section>

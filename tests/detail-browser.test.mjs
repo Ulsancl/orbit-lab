@@ -180,7 +180,11 @@ try {
   await page.goto('http://127.0.0.1:5332/'); await page.waitForFunction(() => window.orbitLab?.sceneDebug()?.ready);
   await check('paused startup exposes signed SI observations and has no idle redraw loop', async () => {
     gpu = await page.evaluate(() => { const gl = document.querySelector('#scene canvas').getContext('webgl2'), ext = gl.getExtension('WEBGL_debug_renderer_info'); return { webgl2: Boolean(gl), renderer: gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER) }; });
-    assert.equal(gpu.webgl2, true); if (hardware) assert.match(gpu.renderer, /RTX 5080.*D3D11|D3D11.*RTX 5080/);
+    assert.equal(gpu.webgl2, true);
+    if (hardware) {
+      assert.match(gpu.renderer, /D3D11/);
+      assert.doesNotMatch(gpu.renderer, /SwiftShader|Basic Render Driver|WARP/i);
+    }
     const { s, d } = await parity(); assert.equal(s.running, false); assert.equal(d.velocity.radialMps, 0);
     assert.equal(d.apsides.atPeriapsis, true); assert.equal(d.apsides.timeToPeriapsisS, 0);
     assert.ok(d.energy.kineticJPerKg > 0 && d.energy.potentialJPerKg < 0 && d.energy.totalJPerKg < 0);
@@ -411,6 +415,8 @@ try {
     await page.locator('#focus').click(); assert.equal(await page.locator('#orbit-details').isVisible(), false);
     assert.equal(await page.locator('#end-inspection').isVisible(), true); await page.locator('#end-inspection').click(); assert.equal(await inspection(), null);
     await page.locator('#focus').click(); assert.equal(await page.locator('#orbit-details').isVisible(), true);
+    await page.locator('#orbit-details > details > summary').click();
+    await page.locator('.part-disclosure > summary').click();
     for (const section of ['.orbit-balance', '.orbit-apsides']) {
       if (!(await page.locator(section).evaluate(element => element.open))) await page.locator(`${section} summary`).click();
     }

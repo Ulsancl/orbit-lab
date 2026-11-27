@@ -178,7 +178,15 @@ export class OrbitChart {
     readouts.className = 'chart-readouts';
     this.readouts = { current: makeReadout('current'), saved: makeReadout('saved') };
     readouts.append(this.readouts.current.item, this.readouts.saved.item);
-    speedContainer.after(radius, this.markerKey, readouts);
+    const distanceDetails = document.createElement('details');
+    distanceDetails.className = 'distance-disclosure';
+    distanceDetails.dataset.mobileDisclosure = '';
+    distanceDetails.open = true;
+    const summary = document.createElement('summary');
+    summary.className = 'mobile-summary';
+    summary.textContent = '거리 그래프와 관찰 수치';
+    distanceDetails.append(summary, radius, this.markerKey, readouts);
+    speedContainer.after(distanceDetails);
 
     this.periodSummary = document.createElement('span');
     this.periodSummary.id = 'chart-period-summary';

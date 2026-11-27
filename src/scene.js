@@ -332,7 +332,7 @@ export class OrbitScene {
   getProjectCameraState() { return this.inspection ? structuredClone(this.inspection.original.camera) : this.getCameraState(); }
   buildOverlay() {
     this.overlay = document.createElement('div'); this.overlay.className = 'orbit-overlay';
-    this.svg = document.createElementNS('http://www.w3.org/2000/svg','svg'); this.svg.classList.add('orbit-leaders'); this.overlay.append(this.svg);
+    this.svg = document.createElementNS('http://www.w3.org/2000/svg','svg'); this.svg.classList.add('orbit-leaders'); this.svg.setAttribute('aria-hidden', 'true'); this.overlay.append(this.svg);
     this.labels = new Map();
     for (const part of COMPONENTS) {
       const button = document.createElement('button'); button.className = 'orbit-label'; button.type = 'button'; button.textContent = part.name;
@@ -380,43 +380,66 @@ export class OrbitScene {
   }
   layoutLabels() {
     if (!this.snapshot) return;
-    const width=this.width, height=this.height, narrow=width<620, labelHeight=30;
+    const width=this.width, height=this.height, compact=width<520, labelHeight=compact?24:30;
     this.notes.hidden = Boolean(this.inspection);
     this.vectorNote.hidden = !this.view.velocity;
     this.currentKey.hidden = !this.view.orbit;
     this.tickNote.hidden = !this.view.orbit || !this.timeTicks.visible;
     this.comparisonKey.hidden = !this.savedGroup.visible;
-    const bottom=height-Math.max(69, this.notes.offsetHeight + 21), occupied=[];
+    const bottom=height-Math.max(compact?34:69, this.notes.offsetHeight + (compact?16:21)), occupied=[];
     const selected=this.view.selectedPart;
     const defaults=this.focusContext??['orbiter','central-body','apsides','orbit-path'];
-    const candidates=[...new Set([selected,...defaults])].slice(0,narrow?3:4);
+    const candidates=[...new Set([selected,...defaults])].slice(0,compact?2:width<620?3:4);
+    const placementOrder=compact?candidates:[...this.labels.keys()].filter(id=>candidates.includes(id));
+    const shown=new Set();
+    const bodies=compact?[
+      ['central-body',G.centralSymbolRadiusWorld],
+      ['orbiter',G.particleSymbolRadiusWorld],
+    ].map(([id,radius])=>{
+      const anchor=this.parts.get(id).anchor;
+      const point=anchor.clone().project(this.camera);
+      const depth=-anchor.clone().applyMatrix4(this.camera.matrixWorldInverse).z;
+      return { x:(point.x*.5+.5)*width, y:(-.5*point.y+.5)*height,
+        radius:radius*this.camera.projectionMatrix.elements[5]/depth*height/2, visible:depth>0 };
+    }).filter(body=>body.visible):[];
     this.labelEvidence=[];
     this.layoutConstructionLabels();
-    for (const [id,label] of this.labels) {
-      label.button.hidden=true; for(const object of [label.halo,label.line,label.dot])object.style.display='none';
-      if (!this.view.labels || !candidates.includes(id)) continue;
+    for (const id of this.view.labels?placementOrder:[]) {
+      const label=this.labels.get(id);
       const part=this.parts.get(id);
       if (!part.node.visible) continue;
       const point=part.anchor.clone().project(this.camera);
       if(point.z < -1 || point.z > 1 || Math.abs(point.x)>1 || Math.abs(point.y)>1)continue;
       const anchorX=(point.x*.5+.5)*width,anchorY=(-point.y*.5+.5)*height;
       const title=id==='central-body' && this.landmarks.circular?'중심체 · 원의 중심':id==='apsides' && this.landmarks.circular?'기준 +X 위치':part.name;
-      const labelWidth = Math.max(54, 21 + Array.from(title).reduce((sum, char) => sum + (/^[\x20-\x7e]$/.test(char) ? 5.5 : narrow ? 10 : 11), 0));
-      label.button.textContent=title; label.button.style.width=`${labelWidth}px`; label.button.classList.toggle('is-selected',id===selected);
+      const caption=compact&&id==='central-body'?'중심체':title;
+      const labelWidth = Math.max(compact?36:54, (compact?15:21) + Array.from(caption).reduce((sum, char) => sum + (/^[\x20-\x7e]$/.test(char) ? 5.5 : width<620?10.5:11), 0));
       const symbolRadius = id === 'central-body' ? G.centralSymbolRadiusWorld : id === 'orbiter' ? G.particleSymbolRadiusWorld : 0;
       const eyeDistance = -part.anchor.clone().applyMatrix4(this.camera.matrixWorldInverse).z;
       const symbolPadding = Math.max(15, symbolRadius * this.camera.projectionMatrix.elements[5] / eyeDistance * height / 2 + 9);
-      const offsets=this.inspection ? [[12-anchorX,12-anchorY]] : [[symbolPadding,-42],[-labelWidth-symbolPadding,-42],[symbolPadding,14],[-labelWidth-symbolPadding,14],[-labelWidth/2,-labelHeight-symbolPadding-20],[-labelWidth/2,symbolPadding+16]];
+      const above=compact?-labelHeight-8:-42, below=compact?9:14;
+      const offsets=this.inspection ? [[12-anchorX,12-anchorY]] : [[symbolPadding,above],[-labelWidth-symbolPadding,above],[symbolPadding,below],[-labelWidth-symbolPadding,below],[-labelWidth/2,-labelHeight-symbolPadding-20],[-labelWidth/2,symbolPadding+16]];
       let best=null;
-      for(const [dx,dy]of offsets){const x=clamp(anchorX+dx,10,width-labelWidth-10),y=clamp(anchorY+dy,this.inspection?12:48,bottom-labelHeight);const rect={x,y,w:labelWidth,h:labelHeight};
+      for(const [dx,dy]of offsets){const x=clamp(anchorX+dx,10,width-labelWidth-10),y=clamp(anchorY+dy,this.inspection?12:compact?20:48,bottom-labelHeight);const rect={x,y,w:labelWidth,h:labelHeight};
+        if(bodies.some(body=>Math.hypot(body.x-clamp(body.x,x,x+rect.w),body.y-clamp(body.y,y,y+rect.h))<body.radius+4))continue;
         if(!occupied.some(other=>rect.x<other.x+other.w+6&&rect.x+rect.w+6>other.x&&rect.y<other.y+other.h+7&&rect.y+rect.h+7>other.y)){best=rect;break;}}
-      if(!best)continue;occupied.push(best);
+      if(!best)continue;occupied.push(best);shown.add(id);
       const x=best.x,y=best.y,endX=clamp(anchorX,x+8,x+labelWidth-8),endY=anchorY<y?y:y+labelHeight;
+      if(label.button.textContent!==caption)label.button.textContent=caption;
+      if(label.button.getAttribute('aria-label')!==title)label.button.setAttribute('aria-label',title);
+      label.button.style.width=`${labelWidth}px`; label.button.classList.toggle('is-selected',id===selected);
       label.button.style.left=`${x}px`;label.button.style.top=`${y}px`;label.button.hidden=false;
-      const d=`M ${anchorX} ${anchorY} L ${endX} ${endY}`;
+      const body=bodies.find(body=>Math.hypot(body.x-anchorX,body.y-anchorY)<=body.radius+1);
+      const ratio=body?Math.min(1,(body.radius+2)/Math.hypot(endX-anchorX,endY-anchorY)):0;
+      const d=`M ${anchorX+ratio*(endX-anchorX)} ${anchorY+ratio*(endY-anchorY)} L ${endX} ${endY}`;
       for(const object of[label.halo,label.line]){object.setAttribute('d',d);object.style.display='';}
-      label.dot.setAttribute('cx',anchorX);label.dot.setAttribute('cy',anchorY);label.dot.style.display='';
+      label.dot.setAttribute('cx',anchorX);label.dot.setAttribute('cy',anchorY);label.dot.style.display=body?'none':'';
       this.labelEvidence.push({id,left:x,top:y,width:labelWidth,height:labelHeight,anchor:[anchorX,anchorY],world:part.anchor.toArray().map(clean)});
+    }
+    for (const [id,label] of this.labels) {
+      if (shown.has(id)) continue;
+      label.button.hidden=true;
+      for (const object of [label.halo,label.line,label.dot]) object.style.display='none';
     }
   }
   layoutConstructionLabels() {

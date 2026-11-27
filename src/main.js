@@ -35,6 +35,20 @@ let savedSnapshot = null, savedSnapshotInput = null;
 const chart = new OrbitChart($('#speed-chart'), $('#period-chart'));
 const inspectionParts = new Set(['velocity-vector','radius-line','orbiter','orbit-path','ellipse-center','second-focus','semimajor-axis']);
 const detailPanel = new OrbitDetailPanel($('#orbit-details'), $('#part-facts'), $('#part-detail-note'), { onInspect: beginInspection });
+const mobileLayout = matchMedia('(max-width: 740px)');
+for (const details of $$('[data-mobile-disclosure]')) {
+  let openOnMobile = false;
+  if (mobileLayout.matches) details.open = openOnMobile;
+  mobileLayout.addEventListener('change', ({ matches }) => {
+    if (matches) {
+      const focusInside = details.contains(document.activeElement) && document.activeElement !== details.firstElementChild;
+      details.open = openOnMobile || focusInside;
+    } else {
+      openOnMobile = details.open;
+      details.open = true;
+    }
+  });
+}
 
 function toast(message) {
   clearTimeout(toastTimer); const close = Object.assign(document.createElement('button'), { textContent: '닫기', type: 'button' });
@@ -473,7 +487,9 @@ document.addEventListener('visibilitychange', () => {
   if (desktop || running) pause();
   if (!desktop) flushBrowserOnHide();
 });
-new ResizeObserver(drawChart).observe($('#speed-chart'));
+const chartResize = new ResizeObserver(drawChart);
+chartResize.observe($('#speed-chart'));
+chartResize.observe($('#radius-chart'));
 window.orbitLab = { getState: () => copy({ experiment, snapshot, view, daysPerSecond, comparison, running }), project: () => { syncTime(); return copy(capture()); },
   loadProject: raw => { const saved = parseProject(raw); remember(); readProject(saved); return copy(capture()); }, sceneDebug: () => scene?.getDebug() ?? null,
   guide: () => copy(guide), chartDebug: () => copy(chart.debug), setProgress, getDetail: () => orbitDetail(snapshot),
