@@ -61,7 +61,9 @@ test('web build checks public inputs and the destination before publishing an is
 });
 
 test('loopback development server serves source files but denies generated diagnostics', async t => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'web-dev-')));
+  // Exercise a regular checkout path. Windows runners put TEMP on a
+  // separate drive under an abbreviated user directory.
+  const root = stagingDirectory(path.resolve(import.meta.dirname, '..'));
   const server = await createServer({
     configFile: path.resolve(import.meta.dirname, '../vite.config.js'),
     root,
