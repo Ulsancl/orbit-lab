@@ -97,3 +97,20 @@ test('a failed flush closes and removes the incomplete sibling without touching 
   assert.equal(closed, true); assert.equal(renamed, false);
   await unchangedAndClean(value);
 });
+
+test('a preexisting sibling stays untouched when exclusive creation fails', async t => {
+  const value = await fixture(t);
+  let existingSibling;
+  const operations = {
+    ...fs,
+    async open(filename, flags, mode) {
+      existingSibling = filename;
+      assert.equal(mode, 0o600);
+      await fs.writeFile(filename, 'existing sibling');
+      return fs.open(filename, flags, mode);
+    },
+  };
+  await assert.rejects(atomicWriteProject(value.target, replacement, { operations, validateTarget: value.validateTarget }), { code: 'EEXIST' });
+  assert.equal(await fs.readFile(existingSibling, 'utf8'), 'existing sibling');
+  assert.equal(await fs.readFile(value.target, 'utf8'), previous);
+});

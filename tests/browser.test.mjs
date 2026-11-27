@@ -177,6 +177,16 @@ try {
       await recovered.saveAs(recoveryPath);
       assert.deepEqual(JSON.parse(await fs.readFile(recoveryPath, 'utf8')), expectedFile);
       assert.equal(await stored(second), latest);
+      await second.reload();
+      await second.waitForFunction(() => window.orbitLab && !document.querySelector('#tab-draft-recovery').hidden);
+      assert.equal(await second.evaluate(key => JSON.parse(sessionStorage.getItem(`${key}:tab-draft`)).contents, storageKey), JSON.stringify(expectedFile));
+      second.once('dialog', dialog => dialog.dismiss());
+      await second.locator('#discard-interrupted-draft').click();
+      assert.equal(await second.locator('#tab-draft-recovery').isVisible(), true);
+      second.once('dialog', dialog => dialog.accept());
+      await second.locator('#discard-interrupted-draft').click();
+      assert.equal(await second.locator('#tab-draft-recovery').isHidden(), true);
+      assert.equal(await second.evaluate(key => sessionStorage.getItem(`${key}:tab-draft`), storageKey), null);
       // Continuous model time is dirty even between the periodic save ticks.
       await second.locator('#play').click();
       assert.equal(await exitsWithWarning(second), true);

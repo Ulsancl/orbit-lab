@@ -2,9 +2,13 @@
 
 이 문서는 Orbit Lab 1.1의 배포 구성과 확인 기준입니다. 실제 통과 결과와 운영체제·GPU·배율은 각 릴리스의 결과 기록을 따릅니다.
 
-Windows x64 NSIS 설치 구성은 사용자별 설치, 설치 폴더 선택, 바탕 화면·시작 메뉴 바로 가기를 제공합니다. 앱 신원은 `com.orbitlab.app`, 로컬 화면 주소는 `app://orbit/`입니다. 앱의 파일 읽기·쓰기와 계산은 로컬에서 수행하며 앱 외부 HTTP/HTTPS 요청을 차단합니다.
+Windows x64 NSIS 설치 구성은 사용자별 설치, 설치 폴더 선택, 바탕 화면·시작 메뉴 바로 가기를 제공합니다. 앱 신원은 `com.orbitlab.app`, 로컬 화면 주소는 `app://orbit/`입니다. 설치 앱은 앱 번들의 요청만 허용합니다. 패키지에서 ASAR 로딩과 무결성 검사를 강제하며 Electron의 Node 실행, Node 환경 옵션, Node 디버거 플래그를 비활성화합니다.
 
-설치 파일은 [공식 릴리스](https://github.com/Ulsancl/orbit-lab/releases/latest)에서 같은 이름의 `.sha256` 파일과 함께 확인합니다. SHA-256은 파일이 기대한 바이트와 같은지 확인하는 수단이며 게시자의 코드 서명을 대신하지 않습니다. 이 빌드는 코드 서명되지 않으며 Windows에 게시자 경고가 나타날 수 있습니다. 자동 업데이트는 없습니다. 실험을 파일로 보관한 뒤 앱을 닫고 새 설치 파일로 직접 업데이트합니다.
+설치 파일은 [공식 릴리스](https://github.com/Ulsancl/orbit-lab/releases/latest)에서 같은 이름의 `.sha256` 파일과 함께 확인합니다. SHA-256은 파일이 기록된 바이트와 같은지 확인합니다. 게시자는 Windows의 **속성 → 디지털 서명**에서 서명의 유효성과 공식 게시자 이름을 대조해 확인합니다. 자동 업데이트는 없습니다. 실험을 파일로 보관한 뒤 앱을 닫고 새 설치 파일로 직접 업데이트합니다.
+
+공식 배포물은 신뢰된 Windows 릴리스 환경에서 `npm run package:release`로 생성합니다. 릴리스 운영자가 관리하는 Authenticode 코드 서명 인증서와 개인 키를 electron-builder에 공급하고, 승인된 인증서의 지문을 `ORBIT_RELEASE_SIGNER_THUMBPRINT`에 설정합니다. 파일 기반 서명은 운영 환경의 `WIN_CSC_LINK`와 `WIN_CSC_KEY_PASSWORD`로 구성할 수 있습니다. Windows에서 설치 파일과 앱 실행 파일의 서명이 모두 유효하고 지문이 일치할 때에만 결과를 `release/windows`에 게시합니다. 인증서와 서명 권한은 릴리스 담당자가 준비합니다.
+
+`npm run package:desktop`은 일반 개발·CI 검증용 미서명 설치 파일을 만듭니다. CI는 배포 구성의 실행 파일과 Fuses를 확인합니다. 네이티브 대화상자와 상태를 자동 검증할 때에는 `npm run package:desktop-test`가 `output/desktop-test`에 생성한 별도 패키지를 사용합니다.
 
 기본 관찰 자료와 창 배치는 사용자 AppData의 `Orbit Lab` 프로필을 사용합니다. 설치 폴더와 분리되어 있고 제거 설정은 앱 데이터 삭제를 비활성화합니다. 실제 제거 시나리오까지 검사했다는 뜻은 아닙니다. 검사는 `ORBIT_LAB_DATA_DIR`의 별도 절대 경로를 사용하여 기본 프로필을 만들거나 덮어쓰지 않도록 합니다.
 

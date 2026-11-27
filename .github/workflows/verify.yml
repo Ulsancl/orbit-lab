@@ -36,11 +36,11 @@ jobs:
           cache-dependency-path: package-lock.json
       - name: Install locked dependencies and runtimes
         run: |
-          npm ci
+          npm ci --ignore-scripts
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           node node_modules/electron/install.js
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          npx --no-install playwright install chromium
+          node node_modules/playwright/cli.js install chromium
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify orbit model, geometry, lessons and project data
         run: npm test
@@ -63,10 +63,15 @@ jobs:
         run: npm run test:desktop
       - name: Package Windows installer
         run: npm run package:desktop
+      - name: Verify production Windows executable and Electron fuses
+        timeout-minutes: 5
+        run: node tests/desktop-release.test.mjs
+      - name: Package isolated native integration fixture
+        run: npm run package:desktop-test
       - name: Verify independent desktop executable
         timeout-minutes: 10
         run: |
-          $env:ORBIT_DESKTOP_EXE = Join-Path $env:GITHUB_WORKSPACE 'release/windows/win-unpacked/Orbit Lab.exe'
+          $env:ORBIT_DESKTOP_EXE = Join-Path $env:GITHUB_WORKSPACE 'output/desktop-test/win-unpacked/Orbit Lab.exe'
           node tests/desktop.test.mjs
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - name: Verify installer checksum and required documents
@@ -79,6 +84,14 @@ jobs:
           if ($taskEntry.Groups['name'].Value -cne [System.IO.Path]::GetFileName($taskInstaller)) { throw 'Checksum filename mismatch' }
           $taskActualHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $taskInstaller).Hash.ToLowerInvariant()
           if ($taskActualHash -cne $taskEntry.Groups['sha'].Value) { throw 'Installer checksum mismatch' }
+          $taskRejectedUnsigned = $false
+          try {
+            & ./scripts/verify-signatures.ps1 -ExpectedThumbprint ('0' * 40) -Installer $taskInstaller -Application 'release/windows/win-unpacked/Orbit Lab.exe'
+          } catch {
+            if ($_.Exception.Message -notmatch 'Authenticode verification failed.*NotSigned') { throw }
+            $taskRejectedUnsigned = $true
+          }
+          if (-not $taskRejectedUnsigned) { throw 'Release verification must reject unsigned CI installers' }
           foreach ($taskNotice in @('LICENSE.electron.txt', 'LICENSES.chromium.html', 'resources/THREE-LICENSE.txt', 'resources/LICENSE.txt', 'resources/docs/THIRD-PARTY-NOTICES.md', 'resources/docs/model.md', 'resources/docs/anatomy.md', 'resources/docs/detail-refinement.md', 'resources/docs/distribution.md', 'resources/docs/storage.md', 'resources/docs/references.md', 'resources/docs/privacy.md', 'resources/docs/support.md', 'resources/사용 안내.txt')) {
             if (-not (Test-Path -PathType Leaf -LiteralPath (Join-Path 'release/windows/win-unpacked' $taskNotice))) { throw "Missing document: $taskNotice" }
           }

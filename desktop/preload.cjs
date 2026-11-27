@@ -4,6 +4,7 @@ contextBridge.exposeInMainWorld('orbitDesktop', {
   isDesktop: true,
   openProject: () => ipcRenderer.invoke('orbit:open-project'),
   saveProject: payload => ipcRenderer.invoke('orbit:save-project', payload),
+  exportOriginal: contents => ipcRenderer.invoke('orbit:export-original', contents),
   setBusy: busy => ipcRenderer.send('orbit:busy', busy === true),
   onCommand: callback => {
     if (typeof callback !== 'function') throw new TypeError('A callback is required');

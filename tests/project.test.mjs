@@ -106,3 +106,15 @@ test('one BOM is accepted and invalid JSON or oversized UTF-8 text is preserved 
   for (const input of ['\ufeff\ufeff' + raw, '{원본\r\n', null, 4]) assert.throws(() => parseProject(input), e => e.code === 'INVALID_JSON');
   for (const input of [' '.repeat(10 * 1024 * 1024 + 1), '가'.repeat(4 * 1024 * 1024)]) assert.throws(() => parseProject(input), e => e.code === 'PROJECT_TOO_LARGE');
 });
+
+test('padded legacy data stays readable while the significant JSON length and depth are bounded', () => {
+  const value = createProject();
+  const raw = serializeProject(value);
+  assert.deepEqual(parseProject('\ufeff' + ' \r\n\t'.repeat(80_000) + raw), value);
+  const comparison = { label: '궤도 [ { \\ "', experiment: value.experiment };
+  const compared = { ...value, comparison };
+  assert.deepEqual(parseProject(serializeProject(compared)), compared);
+  assert.throws(() => parseProject(JSON.stringify({ ...value, name: ' '.repeat(65_536) })), { code: 'PROJECT_TOO_COMPLEX' });
+  const deeplyNested = '['.repeat(20) + 'null' + ']'.repeat(20);
+  assert.throws(() => parseProject(deeplyNested), { code: 'PROJECT_TOO_COMPLEX' });
+});
