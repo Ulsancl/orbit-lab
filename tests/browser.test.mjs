@@ -60,7 +60,8 @@ async function measuredAdvance(a, rate) {
     const before = performance.now(); document.querySelector('#play').click(); const afterStart=performance.now();
     const until = performance.now() + 230; while (performance.now() < until) { /* Deliberately delayed frame. */ }
     const beforeStop=performance.now(); document.querySelector('#play').click();
-    return { lowerElapsedS:(beforeStop-afterStart)/1000,upperElapsedS:(beforeStop-before)/1000,state:window.orbitLab.getState() };
+    const afterStop=performance.now();
+    return { lowerElapsedS:(beforeStop-afterStart)/1000,upperElapsedS:(afterStop-before)/1000,state:window.orbitLab.getState() };
   });
 }
 
@@ -221,7 +222,11 @@ try {
     near(initial.snapshot.periodS / DAY, 365.256898327, 1e-9); relative(initial.snapshot.radiusM, .65 * AU);
     const mesh = await debug(); vector(mesh.centralWorld, [0,0,0]); vector(mesh.orbiterWorld, [.65,0,0]); vector(mesh.ellipseCenterWorld, [-.35,0,0]); vector(mesh.secondFocusWorld, [-.7,0,0]);
     gpu = await page.evaluate(() => { const gl = document.querySelector('#scene canvas').getContext('webgl2'), extension = gl.getExtension('WEBGL_debug_renderer_info'); return { webgl2: Boolean(gl), renderer: gl.getParameter(extension ? extension.UNMASKED_RENDERER_WEBGL : gl.RENDERER) }; });
-    assert.equal(gpu.webgl2, true); if (hardware) assert.match(gpu.renderer, /RTX 5080.*D3D11|D3D11.*RTX 5080/);
+    assert.equal(gpu.webgl2, true);
+    if (hardware) {
+      assert.match(gpu.renderer, /D3D11/);
+      assert.doesNotMatch(gpu.renderer, /SwiftShader|Basic Render Driver|WARP/i);
+    }
     await paint(); await page.waitForTimeout(150); const before = await debug(); await page.waitForTimeout(150); assert.equal((await debug()).renderFrame, before.renderFrame);
   });
 
@@ -358,15 +363,81 @@ try {
     await context.setOffline(true);try{await conditions(.5,.8);await progress(0);relative((await state()).snapshot.speedMps,3*circularSpeed(.5));await page.locator('#pin-comparison').click();assert.equal((await state()).comparison.experiment.config.eccentricity,.8);await page.locator('#help').click();assert.equal(await page.locator('#help-dialog').isVisible(),true);await page.locator('#close-help').click();}finally{await context.setOffline(false);}
   });
 
-  await check('1600, 1024 and 390 pixel layouts keep observation and file controls reachable', async () => {
+  await check('desktop, 500 and 390 pixel layouts keep observation and file controls reachable', async () => {
     await dismissToast();
-    for(const [width,height] of [[1600,1000],[1024,768],[390,844]]){
+    for(const [width,height] of [[1600,1000],[1024,768],[500,900],[390,844]]){
       await page.setViewportSize({width,height});await paint();assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth)<=1,`horizontal overflow at ${width}`);
       for(const id of ['a','a-number','eccentricity','eccentricity-number','play','progress','rate','part-select','focus-part','save-project','open-project','help']){const control=page.locator(`#${id}`);await control.scrollIntoViewIfNeeded();assert.equal(await control.isVisible(),true,`${id} at ${width}`);const box=await control.boundingBox();assert.ok(box.width>0&&box.x>=-1&&box.x+box.width<=width+1,`${id} clipped at ${width}`);}
       for(const name of ['period','speed','area'])assert.equal(await page.locator(`[data-lesson="${name}"]`).isVisible(),true);
       await page.screenshot({path:path.join(output,`orbit-${width}.png`),fullPage:true});
     }
     await conditions(.75,.4);await progress(75);relative((await state()).snapshot.periodS,period(.75));near((await state()).experiment.meanAnomalyRad,1.5*Math.PI);await page.locator('#help').click();assert.equal(await page.locator('#help-dialog').isVisible(),true);await page.locator('#close-help').click();
+  });
+
+  await check('500-pixel touch layout keeps file actions and compact scene labels available and folds secondary content', async () => {
+    const mobile = await browser.newContext({ viewport: { width: 500, height: 900 }, hasTouch: true });
+    try {
+      const phone = await mobile.newPage(); watch(phone);
+      await phone.goto(baseURL);
+      await phone.waitForFunction(() => window.orbitLab?.sceneDebug()?.ready);
+      const fileActions = phone.getByRole('navigation', { name: '실험 파일' });
+      const fresh = fileActions.getByRole('button', { name: '새 실험' });
+      const open = fileActions.getByRole('button', { name: '열기' });
+      const save = fileActions.getByRole('button', { name: '파일 저장' });
+      const help = fileActions.getByRole('button', { name: '도움말' });
+      const header = await phone.locator('.app-header').boundingBox();
+      for (const control of [fresh, open, save, help]) {
+        const box = await control.boundingBox();
+        assert.ok(box.width >= 44 && box.height >= 44);
+        assert.ok(box.y >= header.y && box.y + box.height <= header.y + 60);
+      }
+      await fresh.focus();
+      await phone.keyboard.press('Tab');
+      assert.equal(await open.evaluate(button => document.activeElement === button), true);
+      await help.focus();
+      await phone.keyboard.press('Enter');
+      assert.equal(await phone.locator('#help-dialog').isVisible(), true);
+      await phone.locator('#close-help').tap();
+      await phone.locator('#eccentricity-number').fill('0.42');
+      await phone.locator('#eccentricity-number').press('Tab');
+      const expectedProject = await phone.evaluate(() => window.orbitLab.project());
+      assert.equal(expectedProject.experiment.config.eccentricity, .42);
+      const download = phone.waitForEvent('download');
+      await save.tap();
+      assert.match((await download).suggestedFilename(), /\.orbit\.json$/);
+      await fresh.tap();
+      assert.equal(await phone.locator('#eccentricity-number').inputValue(), '0.35');
+      const undo = await fileActions.getByRole('button', { name: '되돌리기' }).boundingBox();
+      assert.ok(undo && undo.y + undo.height <= header.y + 60);
+      const chooser = phone.waitForEvent('filechooser');
+      await open.tap();
+      await (await chooser).setFiles({ name: 'mobile.orbit.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(expectedProject)) });
+      await phone.waitForFunction(() => window.orbitLab.getState().experiment.config.eccentricity === .42);
+
+      const labels = phone.locator('.orbit-label:visible');
+      assert.equal(await labels.count(), 2);
+      const center = phone.getByRole('button', { name: '중심체 · 중력 초점' });
+      const centerBox = await center.boundingBox();
+      assert.equal(centerBox.height, 24);
+      await center.tap();
+      assert.equal(await phone.locator('#part-select').inputValue(), 'central-body');
+
+      for (const selector of ['.scene-disclosure', '.part-disclosure', '.distance-disclosure', '#orbit-details > details']) {
+        const summary = phone.locator(`${selector} > summary`);
+        assert.equal(await summary.evaluate(node => node.parentElement.open), false);
+        await summary.tap();
+        assert.equal(await summary.evaluate(node => node.parentElement.open), true);
+        await summary.focus();
+        await phone.keyboard.press('Space');
+        assert.equal(await summary.evaluate(node => node.parentElement.open), false);
+      }
+      await phone.setViewportSize({ width: 1366, height: 900 });
+      await phone.waitForFunction(() => [...document.querySelectorAll('[data-mobile-disclosure]')].every(details => details.open));
+      assert.equal(await phone.locator('.distance-disclosure summary').isVisible(), false);
+      assert.ok(await phone.locator('.orbit-label:visible').count() > 2);
+      await phone.setViewportSize({ width: 500, height: 900 });
+      await phone.waitForFunction(() => [...document.querySelectorAll('[data-mobile-disclosure]')].every(details => !details.open));
+    } finally { await mobile.close(); }
   });
   await page.setViewportSize({width:1600,height:1000});await page.locator('#new-project').click();await dismissToast();await page.locator('[data-camera="iso"]').click();await page.evaluate(()=>scrollTo(0,0));await paint();
   await page.screenshot({path:path.join(output,'orbit-default-viewport.png')});await page.screenshot({path:path.join(output,'orbit-default-full.png'),fullPage:true});

@@ -1,5 +1,6 @@
 .charts .kinematics-radius,
-.charts .chart-readouts {
+.charts .chart-readouts,
+.charts .chart-apsis-key {
   margin-inline: 22px;
 }
 
@@ -62,7 +63,9 @@
 
 @media (max-width: 740px) {
   .charts .kinematics-radius,
-  .charts .chart-readouts {
+  .charts .chart-readouts,
+  .charts .chart-apsis-key {
     margin-inline: 15px;
   }
+  .charts .kinematics-radius { border-top: 0; }
 }

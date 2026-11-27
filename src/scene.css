@@ -24,7 +24,9 @@
   background: #0b1829ed;
   color: #e0edf8;
   pointer-events: auto;
-  font: 500 11px/1.35 "Segoe UI", "Malgun Gothic", sans-serif;
+  font-weight: 500;
+  font-size: 11px;
+  line-height: 1.35;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -42,7 +44,9 @@
   align-items: end;
   justify-content: space-between;
   gap: 8px;
-  font: 500 11px/1.45 "Segoe UI", "Malgun Gothic", sans-serif;
+  font-weight: 500;
+  font-size: 11px;
+  line-height: 1.45;
   color: #d0dfed;
 }
 
@@ -87,7 +91,9 @@
   color: #e0eaf5;
   background: #0a1525ed;
   white-space: nowrap;
-  font: 500 10px/1.45 "Segoe UI", "Malgun Gothic", sans-serif;
+  font-weight: 500;
+  font-size: 10px;
+  line-height: 1.45;
 }
 
 .orbit-construction-leader { stroke-width: 1; opacity: .75; }
@@ -100,4 +106,15 @@
   .orbit-keys { justify-content: center; padding: 4px 6px; gap: 2px 9px; }
   .orbit-detail-legend { font-size: 10px; gap: 4px 9px; }
   .orbit-construction-label { font-size: 9px; }
+}
+
+@container (max-width: 519px) {
+  .orbit-label { height: 24px; min-height: 24px; padding: 3px 6px; box-shadow: 0 2px 7px #0006; }
+  .orbit-leader-halo { stroke-width: 3; }
+}
+
+@media (max-width: 740px) {
+  .orbit-notes { inset: auto 8px 8px; display: flex; justify-content: flex-end; }
+  .orbit-scale-note, .orbit-keys .orbit-key-tick, .orbit-keys .orbit-vector-note { display: none; }
+  .orbit-keys:not(:has(.orbit-key-current:not([hidden]), .orbit-key-saved:not([hidden]))) { display: none; }
 }

@@ -14,7 +14,8 @@ const arrow = (x, y, dx, dy) => {
 export class OrbitDetailPanel {
   constructor(root, facts, note, { onInspect }) {
     this.root = root; this.facts = facts; this.note = note;
-    root.innerHTML = `<div class="panel-heading"><div><p class="eyebrow">READ THE COMPONENTS</p><h2 id="orbit-detail-title">얼마나 멀어지고, 얼마나 돌아갈까요?</h2></div></div>
+    root.innerHTML = `<details data-mobile-disclosure open><summary class="mobile-summary">속도 성분과 궤도각 자세히</summary>
+      <div class="panel-heading"><div><p class="eyebrow">READ THE COMPONENTS</p><h2 id="orbit-detail-title">얼마나 멀어지고, 얼마나 돌아갈까요?</h2></div></div>
       <div class="orbit-detail-grid"><section class="velocity-detail"><h3>속도 하나를 두 방향으로 나누기</h3><div class="velocity-detail-body"><figure><svg viewBox="0 0 300 220" role="img" aria-label="속도의 방사 성분을 가로축, 횡방향 성분을 세로축에 표시. 표시된 축 눈금의 단위는 km/s이며 관찰 범위에 맞춰 바뀝니다."><path d="M18 170H270M90 193V25M40 166V174M140 166V174M86 120H94M86 70H94" stroke="#435877" fill="none"/><text x="193" y="190">바깥 +r</text><text x="100" y="24">회전 +θ</text><text id="velocity-tick-x" x="131" y="186"></text><text id="velocity-tick-y" x="61" y="123"></text><text id="velocity-tick-top" x="55" y="73"></text><path id="velocity-completion" stroke="#546680" fill="none" stroke-dasharray="3 4"/><path id="radial-vector" stroke="#f0a58e" fill="none" stroke-width="2.5"/><path id="transverse-vector" stroke="#a7deb1" fill="none" stroke-width="2.5"/><path id="total-vector" stroke="#87d9ff" fill="none" stroke-width="3"/><circle cx="90" cy="170" r="3" fill="#e4edf9"/></svg><figcaption id="velocity-plot-scale"></figcaption></figure><dl class="detail-values"><div><dt>방사 속도 vᵣ</dt><dd data-detail-value="velocity.radialMps" data-factor="0.001" data-unit="km/s"></dd></div><div><dt>횡방향 속도 vθ</dt><dd data-detail-value="velocity.transverseMps" data-factor="0.001" data-unit="km/s"></dd></div><div><dt>전체 속력 |v|</dt><dd data-detail-value="velocity.speedMps" data-factor="0.001" data-unit="km/s"></dd></div><div><dt>횡방향에서 기운 각 γ</dt><dd data-detail-value="velocity.flightPathAngleRad" data-factor="57.29577951308232" data-unit="°"></dd></div></dl></div><p id="radial-motion-note"></p><p class="hint">횡방향은 반지름에 수직인 방향입니다. 타원 궤도의 접선 방향은 두 성분을 합친 전체 속도입니다. 가속도는 항상 중심체 방향입니다.</p><button type="button" data-detail-inspect="velocity-vector">3D에서 속도 성분 보기</button></section>
       <section class="phase-detail"><h3>같은 위치를 나타내는 세 각도</h3><div class="anomaly-rows">${[['meanAnomalyRad','M · 시간의 각','균일하게 늘어나는 시간 기준'],['eccentricAnomalyRad','E · 보조원의 각','타원 중심에서 보조원으로'],['trueAnomalyRad','ν · 실제 위치각','중심체가 있는 초점에서 입자로']].map(([key,label,note])=>`<div class="anomaly-row" data-anomaly="${key}"><div><strong>${label}</strong><b data-detail-value="phase.${key}" data-factor="57.29577951308232" data-unit="°"></b></div><div class="anomaly-track" aria-hidden="true"><i></i></div><small>${note}</small></div>`).join('')}</div><p id="anomaly-note" class="hint"></p><p class="hint">각도 막대는 같은 0–360° 척도입니다. M은 한 주기 안의 시간 위치를, ν는 중심체에서 본 입자의 방향을 나타냅니다.</p><button type="button" data-detail-inspect="orbit-path">3D에서 각도 구성 보기</button></section></div>
       <details class="orbit-balance"><summary>중력·에너지·각운동량 함께 읽기</summary><div class="detail-values balance-values">${[
@@ -30,7 +31,7 @@ export class OrbitDetailPanel {
           <div><dt>현재 반지름의 탈출 속력</dt><dd data-detail-value="velocity.escapeMps" data-factor="0.001" data-unit="km/s"></dd></div>
         </dl>
         <p class="hint">비율은 한 바퀴의 시간 진행률입니다. 해당 위치에 정확히 있으면 남은 시간은 0일입니다. 원은 거리와 속력이 일정합니다. 두 기준 속력은 현재 중심 거리를 기준으로 계산합니다.</p>
-      </details>`;
+      </details></details>`;
     root.querySelectorAll('[data-detail-inspect]').forEach(button=>button.addEventListener('click',()=>onInspect(button.dataset.detailInspect)));
   }
   render(snapshot, partId) {
